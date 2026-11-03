@@ -2,9 +2,9 @@
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import GLOVE_JOINTS
-from wujihand2_force_glove.real_hand.force_geometry import ForceJacobianColumns
-from wujihand2_force_glove.real_hand.runtime import RetargetPipelineFactory
+from motorhand_teleop.domain import GLOVE_JOINTS
+from motorhand_teleop.real_hand.force_geometry import ForceJacobianColumns
+from motorhand_teleop.real_hand.runtime import RetargetPipelineFactory
 
 
 @pytest.mark.parametrize('positions', [

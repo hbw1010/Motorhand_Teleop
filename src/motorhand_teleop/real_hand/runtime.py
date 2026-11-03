@@ -528,7 +528,8 @@ def _parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name, help="只读检查" if name == "inspect" else "单跟随端位置控制")
         command.add_argument("--hand", choices=("left", "right"), default="right", help="Wuji侧左右手")
         command.add_argument("--glove-hand", choices=("left", "right"), default="right", help="MotorHand侧CAD左右手，现场默认right")
-        command.add_argument("--wuji-serial", help="显式设备SN；inspect未提供时只列discover")
+        command.add_argument("--wuji-serial", help="可选设备SN；不指定时仅在发现唯一二代手时自动选择")
+        command.add_argument("--wuji-address", help="可选设备地址；手动指定地址时须同时指定SN")
         command.add_argument("--approved-firmware", help="用户明确批准的Wuji固件完整版本字符串")
         command.add_argument("--mapping", type=Path, help="MotorHand轴序/零位/符号/软限位标定JSON")
         command.add_argument("--assets", type=Path, help="本项目 hand_motor_ve33 资产目录")
@@ -574,8 +575,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "follow":
         if args.rate is None:
             args.rate = 50.0 if args.mode == FollowMode.GLOVE_TO_HAND2.value else 20.0
-        if not args.wuji_serial:
-            parser.error("follow 必须显式提供 --wuji-serial，禁止自动选择首个设备")
+        if args.wuji_address and not args.wuji_serial:
+            parser.error("--wuji-address 必须同时提供 --wuji-serial")
         if args.execute and not args.approved_firmware:
             parser.error("--execute 必须同时提供 --approved-firmware 完整批准版本")
         if not np.isfinite(args.rate) or args.rate <= 0:
@@ -595,6 +596,12 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--contact-feedback-config 必须同时指定 --feedback-linear-config")
         if args.torque_only and args.feedback_linear_config is None:
             parser.error("--torque-only 需要 --feedback-linear-config 名义Nm模式")
+    if args.command == "follow":
+        if not args.wuji_address:
+            from .preflight import select_device
+            selected = select_device(serial_number=args.wuji_serial)
+            args.wuji_serial = selected["serial_number"]
+            args.wuji_address = selected["address"]
     feedback_config = None
     contact_config = None
     if args.command == "follow":
@@ -641,7 +648,7 @@ def main(argv: list[str] | None = None) -> int:
             }
             if args.wuji_serial:
                 driver = WujiHand2HardwareDriver(
-                    hand=args.hand, serial_number=args.wuji_serial,
+                    hand=args.hand, serial_number=args.wuji_serial, address=args.wuji_address or "",
                     approved_firmware_version=args.approved_firmware,
                 )
                 report["Wuji身份"] = _identity_json(driver.connect(serial_number=args.wuji_serial))
@@ -669,7 +676,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return 0
         driver = WujiHand2HardwareDriver(
-            hand=args.hand, serial_number=args.wuji_serial,
+            hand=args.hand, serial_number=args.wuji_serial, address=args.wuji_address or "",
             approved_firmware_version=args.approved_firmware,
         )
         bridge = create_retargeter(

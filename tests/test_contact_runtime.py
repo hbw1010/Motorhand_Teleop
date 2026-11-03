@@ -6,12 +6,12 @@ import socket
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import GLOVE_JOINTS
-from wujihand2_force_glove.real_hand.contact_feedback import ContactFeedbackConfig
-from wujihand2_force_glove.real_hand.curve_telemetry import CurvePublisher, decode_sample
-from wujihand2_force_glove.real_hand.force_feedback import ForceFeedbackController
-from wujihand2_force_glove.real_hand.force_linear import MaxTorqueLinearConfig
-from wujihand2_force_glove.real_hand.runtime import (
+from motorhand_teleop.domain import GLOVE_JOINTS
+from motorhand_teleop.real_hand.contact_feedback import ContactFeedbackConfig
+from motorhand_teleop.real_hand.curve_telemetry import CurvePublisher, decode_sample
+from motorhand_teleop.real_hand.force_feedback import ForceFeedbackController
+from motorhand_teleop.real_hand.force_linear import MaxTorqueLinearConfig
+from motorhand_teleop.real_hand.runtime import (
     FollowMode, PairRuntime, RetargetPipelineFactory, create_retargeter,
 )
 from test_real_hand_runtime import Clock, EffortHandPlant, ForceMotorPlant, MotorPlant

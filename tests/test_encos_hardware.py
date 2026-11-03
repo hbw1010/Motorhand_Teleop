@@ -4,12 +4,12 @@ import json
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import GLOVE_JOINTS, GlovePose
-from wujihand2_force_glove.real_hand.motor_hand import (
+from motorhand_teleop.domain import GLOVE_JOINTS, GlovePose
+from motorhand_teleop.real_hand.motor_hand import (
     EncosCalibrationRequired,
     EncosGloveHardwareDriver,
 )
-from wujihand2_force_glove.ve33_adapter import Ve33GloveModel
+from motorhand_teleop.ve33_adapter import Ve33GloveModel
 from test_ve33_adapter import cad_oracle
 
 
@@ -257,7 +257,7 @@ def test_encos_construction_and_close_do_not_load_cad_or_connect_sdk(tmp_path):
 
 def test_encos_rechecks_original_deadline_after_sdk_preparation(monkeypatch):
     clock = [1]
-    monkeypatch.setattr("wujihand2_force_glove.real_hand.motor_hand.time.monotonic_ns", lambda: clock[0])
+    monkeypatch.setattr("motorhand_teleop.real_hand.motor_hand.time.monotonic_ns", lambda: clock[0])
     class SlowHand(FakeEncosHand):
         def get_all_feedbacks(self):
             clock[0] = 101
@@ -715,7 +715,7 @@ def test_force_rechecks_original_deadline_after_feedback_read(monkeypatch):
     driver.enable_force_feedback()
     backend.commands.clear()
     clock = [1]
-    monkeypatch.setattr("wujihand2_force_glove.real_hand.motor_hand.time.monotonic_ns",
+    monkeypatch.setattr("motorhand_teleop.real_hand.motor_hand.time.monotonic_ns",
                         lambda: clock[0])
     def advance():
         clock[0] = 101
@@ -1064,7 +1064,7 @@ def test_nominal_torque_rechecks_original_deadline_after_feedback(monkeypatch):
     driver.enable_force_feedback()
     backend.commands.clear()
     clock = [1]
-    monkeypatch.setattr("wujihand2_force_glove.real_hand.motor_hand.time.monotonic_ns", lambda: clock[0])
+    monkeypatch.setattr("motorhand_teleop.real_hand.motor_hand.time.monotonic_ns", lambda: clock[0])
     def advance():
         clock[0] = 101
     backend.advance = advance

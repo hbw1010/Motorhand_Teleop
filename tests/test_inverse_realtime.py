@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 from scipy.optimize import least_squares, minimize
 
-from wujihand2_force_glove.bidirectional import GloveInverseSolver, GloveTaskModel
-from wujihand2_force_glove.domain import GLOVE_JOINTS
-from wujihand2_force_glove.landmarks import Ve33LandmarkSource
+from motorhand_teleop.bidirectional import GloveInverseSolver, GloveTaskModel
+from motorhand_teleop.domain import GLOVE_JOINTS
+from motorhand_teleop.landmarks import Ve33LandmarkSource
 
 
 ASSET_ROOT = Path(__file__).resolve().parents[1] / "assets" / "hand_motor_ve33"
@@ -272,7 +272,7 @@ def test_infeasible_motor_limits_do_not_commit_a_falsely_successful_solution():
 def test_successful_optimizer_with_gross_motor_violation_is_rejected(monkeypatch):
     """优化器误报成功时，大幅越过电机限位仍不得生成可发送姿态。"""
     from types import SimpleNamespace
-    import wujihand2_force_glove.bidirectional as bidirectional
+    import motorhand_teleop.bidirectional as bidirectional
 
     model = _model()
     solver = GloveInverseSolver(model)
@@ -292,7 +292,7 @@ def test_successful_optimizer_with_gross_motor_violation_is_rejected(monkeypatch
 
 def test_recorded_hand_pose_at_motor_boundary_produces_feasible_cad_tree():
     """相邻实测姿态在SLSQP微小电机边界误差下仍须得到真实可发的闭链解。"""
-    from wujihand2_force_glove.real_hand.runtime import create_retargeter
+    from motorhand_teleop.real_hand.runtime import create_retargeter
 
     frames = np.array([
         [0.1141602441508376, -0.518103999115052, 0.19393482140009408, 0.08768142988872857,
@@ -567,7 +567,7 @@ def test_task_from_complete_tree_rejects_invalid_or_broken_cad_without_commit(in
 
 
 def test_hand2_feedback_fk_preserves_measured_abduction_without_unlocking_forward():
-    from wujihand2_force_glove.real_hand.runtime import create_retargeter
+    from motorhand_teleop.real_hand.runtime import create_retargeter
 
     bridge = create_retargeter()
     zero = np.zeros(20)
@@ -632,7 +632,7 @@ def _benchmark_inverse():
 
 def _benchmark_hand2_inverse():
     """官方正向骨架目标的冷逆解与真实反馈滞后；不把不同骨架误差伪称为可达。"""
-    from wujihand2_force_glove.real_hand.runtime import create_retargeter
+    from motorhand_teleop.real_hand.runtime import create_retargeter
 
     bridge = create_retargeter()
     failures = []
@@ -666,7 +666,7 @@ def _benchmark_complex_runtime():
     import runpy
     from time import sleep
 
-    from wujihand2_force_glove.real_hand.runtime import create_retargeter
+    from motorhand_teleop.real_hand.runtime import create_retargeter
 
     fixtures = runpy.run_path(str(Path(__file__).with_name("test_real_hand_runtime.py")))
     runtime, hand, glove, _, _ = fixtures["_complex_readonly_pair"](create_retargeter())

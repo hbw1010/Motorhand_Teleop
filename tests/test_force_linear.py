@@ -7,14 +7,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import GLOVE_JOINTS
-from wujihand2_force_glove.feedback import CalibrationRequired
-from wujihand2_force_glove.real_hand.force_linear import (
+from motorhand_teleop.domain import GLOVE_JOINTS
+from motorhand_teleop.feedback import CalibrationRequired
+from motorhand_teleop.real_hand.force_linear import (
     LinearTorqueProjection,
     MaxTorqueLinearConfig,
     project_max_torque_linear,
 )
-from wujihand2_force_glove.retargeting import GloveWujiRetargetPipeline, default_retarget_config
+from motorhand_teleop.retargeting import GloveWujiRetargetPipeline, default_retarget_config
 
 ROOT = Path(__file__).parents[1]
 

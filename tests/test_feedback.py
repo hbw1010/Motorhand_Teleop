@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import RetargetedPose
-from wujihand2_force_glove.feedback import (
+from motorhand_teleop.domain import RetargetedPose
+from motorhand_teleop.feedback import (
     CalibrationRequired,
     CalibratedFeedback,
     CurrentTorqueCalibration,

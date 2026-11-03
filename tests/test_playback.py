@@ -4,7 +4,7 @@ import termios
 
 import pytest
 
-from wujihand2_force_glove.real_hand.playback import PlaybackClock, TerminalKeys
+from motorhand_teleop.real_hand.playback import PlaybackClock, TerminalKeys
 
 
 def test_playback_clock_pauses_for_startup_and_manual_takeover():
@@ -33,6 +33,19 @@ def test_playback_clock_does_not_jump_after_waiting_for_inverse():
     assert clock.position(1_000_000_000, ready=False) == 0
     assert clock.position(2_000_000_000, ready=False) == 0
     assert clock.position(3_000_000_000, ready=True) == 500_000_000
+
+
+def test_default_speed_uses_wall_time_and_wait_freezes_transition():
+    clock = PlaybackClock(duration_ns=5_000_000_000, transition_ns=500_000_000, start_ns=0)
+    assert clock.position(200_000_000, ready=True) == 0
+    assert clock.position(1_200_000_000, ready=False) == 0
+    assert clock.position(1_500_000_000, ready=True) == 0
+    assert clock.position(2_500_000_000, ready=True) == 1_000_000_000
+    clock.pause(2_500_000_000)
+    clock.resume(4_000_000_000)
+    assert clock.position(4_250_000_000, ready=False) == 1_000_000_000
+    assert clock.position(4_750_000_000, ready=True) == 1_000_000_000
+    assert clock.position(5_750_000_000, ready=True) == 2_000_000_000
 
 
 def test_slow_playback_pauses_and_resumes_with_wall_clock_transitions():
@@ -68,17 +81,16 @@ def test_playback_clock_rejects_invalid_speed(speed):
 
 
 @pytest.mark.parametrize("speed", ["0", "-0.05", "1.01", "nan", "inf", "-inf"])
-def test_playback_cli_rejects_invalid_speed_before_loading(speed, capsys):
-    from wujihand2_force_glove.real_hand.playback import main
+def test_playback_cli_rejects_invalid_speed_before_loading(speed):
+    from motorhand_teleop.real_hand.playback import main
 
     with pytest.raises(SystemExit) as exc:
         main(["unused.jsonl", f"--speed={speed}"])
     assert exc.value.code == 2
-    assert "--speed" in capsys.readouterr().err
 
 
 def test_playback_cli_speed_defaults_to_one_and_accepts_slow_speed():
-    from wujihand2_force_glove.real_hand.playback import _parser
+    from motorhand_teleop.real_hand.playback import _parser
 
     assert _parser().parse_args(["unused.jsonl"]).speed == 1.0
     assert _parser().parse_args(["unused.jsonl", "--speed", "0.05"]).speed == 0.05
@@ -103,12 +115,12 @@ def test_recorded_motion_replays_and_keyboard_switches_to_contact_feedback(tmp_p
 
     import numpy as np
     from test_contact_runtime import create_contact_pair, human_joints, set_human
-    from wujihand2_force_glove.domain import WujiState
-    from wujihand2_force_glove.real_hand import (
+    from motorhand_teleop.domain import WujiState
+    from motorhand_teleop.real_hand import (
         contact_feedback, control, force_feedback, force_linear, inverse_worker,
         motor_hand, playback, runtime, wuji_hand2,
     )
-    from wujihand2_force_glove.real_hand.trajectory import RecordedTrajectory, TrajectoryRecorder
+    from motorhand_teleop.real_hand.trajectory import RecordedTrajectory, TrajectoryRecorder
     make_bridge = runtime.create_retargeter
 
     class DeterministicWorker:

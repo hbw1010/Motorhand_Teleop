@@ -1,4 +1,4 @@
-"""python -m wujihand2_force_glove.real_hand 的显式安全入口。"""
+"""python -m motorhand_teleop.real_hand 的显式安全入口。"""
 
 from .runtime import main
 

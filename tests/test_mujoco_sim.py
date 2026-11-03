@@ -4,8 +4,8 @@ import mujoco
 import numpy as np
 import yaml
 
-from wujihand2_force_glove.mujoco_sim import build_glove_mjcf
-from wujihand2_force_glove.retargeting import wuji_hand2_joint_names
+from motorhand_teleop.mujoco_sim import build_glove_mjcf
+from motorhand_teleop.retargeting import wuji_hand2_joint_names
 
 
 ROOT = Path(__file__).parents[1]
@@ -20,9 +20,9 @@ def test_official_hand2_mjcf_matches_retarget_joint_order():
 
 
 def test_viewer_mount_uses_canonical_rigid_registration():
-    from wujihand2_force_glove.domain import GLOVE_JOINTS
-    from wujihand2_force_glove.landmarks import Ve33LandmarkSource
-    from wujihand2_force_glove.mujoco_viewer import _HAND_JOINTS, _glove_to_hand_mount
+    from motorhand_teleop.domain import GLOVE_JOINTS
+    from motorhand_teleop.landmarks import Ve33LandmarkSource
+    from motorhand_teleop.mujoco_viewer import _HAND_JOINTS, _glove_to_hand_mount
     from scipy.spatial.transform import Rotation
 
     source = Ve33LandmarkSource("right", asset_root=ROOT / "assets" / "hand_motor_ve33")
@@ -54,7 +54,7 @@ def test_viewer_mount_uses_canonical_rigid_registration():
 
 
 def test_hand2_viewer_uses_position_targets_and_moves_the_hand():
-    from wujihand2_force_glove.mujoco_viewer import _HAND_JOINTS, _hand_position_actuators
+    from motorhand_teleop.mujoco_viewer import _HAND_JOINTS, _hand_position_actuators
 
     model_path = ROOT / "vendor/wuji-retargeting/wuji_retargeting/wuji-description/hand2/hand2_beta1/body/mjcf/right.xml"
     model = mujoco.MjModel.from_xml_path(str(model_path))

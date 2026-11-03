@@ -2,8 +2,8 @@ from pathlib import Path
 
 import numpy as np
 
-from wujihand2_force_glove.domain import GLOVE_JOINTS
-from wujihand2_force_glove.landmarks import Ve33LandmarkSource
+from motorhand_teleop.domain import GLOVE_JOINTS
+from motorhand_teleop.landmarks import Ve33LandmarkSource
 
 
 ROOT = Path(__file__).parents[1]

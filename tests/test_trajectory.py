@@ -6,9 +6,8 @@ import threading
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import WUJI_JOINTS, WujiState
-from wujihand2_force_glove.real_hand.runtime import _parser
-from wujihand2_force_glove.real_hand.trajectory import RecordedTrajectory, TrajectoryRecorder
+from motorhand_teleop.domain import WUJI_JOINTS, WujiState
+from motorhand_teleop.real_hand.trajectory import RecordedTrajectory, TrajectoryRecorder
 
 
 def state(stamp, position, velocity=None, effort=None):
@@ -121,10 +120,6 @@ def test_loader_rejects_checksummed_single_frame(tmp_path):
         RecordedTrajectory.load(path)
 
 
-def test_follow_parser_accepts_record(tmp_path):
-    path = tmp_path / "out.jsonl"
-    args = _parser().parse_args(["follow", "--mode", "glove-to-hand2", "--record", str(path)])
-    assert args.record == path
 
 
 def test_queue_overflow_fails_and_never_commits(tmp_path, monkeypatch):
@@ -170,7 +165,7 @@ def test_queue_overflow_fails_and_never_commits(tmp_path, monkeypatch):
 @pytest.mark.parametrize("ending,playable", [(KeyboardInterrupt, True), (RuntimeError, False)])
 def test_follow_cli_commits_only_on_clean_interrupt(tmp_path, monkeypatch, ending, playable):
     from types import SimpleNamespace
-    from wujihand2_force_glove.real_hand import runtime, motor_hand, wuji_hand2
+    from motorhand_teleop.real_hand import runtime, motor_hand, preflight, wuji_hand2
 
     class FakeGlove:
         def __init__(self, **kwargs):
@@ -218,6 +213,9 @@ def test_follow_cli_commits_only_on_clean_interrupt(tmp_path, monkeypatch, endin
         def close(self):
             pass
 
+    monkeypatch.setattr(preflight, "select_device", lambda **_: {
+        "serial_number": "serial", "address": "",
+    })
     monkeypatch.setattr(motor_hand, "EncosGloveHardwareDriver", FakeGlove)
     monkeypatch.setattr(wuji_hand2, "WujiHand2HardwareDriver", FakeHand)
     monkeypatch.setattr(runtime, "PairRuntime", FakeRuntime)

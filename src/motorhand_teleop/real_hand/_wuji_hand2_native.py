@@ -112,7 +112,7 @@ class _State(ctypes.Structure):
 
 @lru_cache(maxsize=1)
 def _native_library():
-    hint = ("请先执行 cmake -S src/wujihand2_force_glove/real_hand/native -B .cache/native-real-hand/build "
+    hint = ("请先执行 cmake -S src/motorhand_teleop/real_hand/native -B .cache/native-real-hand/build "
             "&& cmake --build .cache/native-real-hand/build --parallel；"
             "构建需要固定版本官方 C SDK，导入与构造不会自动下载或构建")
     if not _LIBRARY.is_file():

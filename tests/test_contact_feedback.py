@@ -5,9 +5,9 @@ from dataclasses import FrozenInstanceError
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import WujiState
-from wujihand2_force_glove.feedback import CalibrationRequired
-from wujihand2_force_glove.real_hand.contact_feedback import (
+from motorhand_teleop.domain import WujiState
+from motorhand_teleop.feedback import CalibrationRequired
+from motorhand_teleop.real_hand.contact_feedback import (
     ContactFeedbackConfig,
     ContactImpedance,
 )

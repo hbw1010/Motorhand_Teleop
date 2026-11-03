@@ -118,12 +118,15 @@ class Ve33Kinematics:
         self._tree_children = tuple(self._fk.j[name][1] for name in self._tree_names)
         self._tree_axes = np.array([self._fk.j[name][4] for name in self._tree_names], dtype=float)
         self._tree_axes /= np.linalg.norm(self._tree_axes, axis=1)[:, None]
-        self._tree_prismatic = np.array([self._fk.j[name][0] == "prismatic" for name in self._tree_names])
-        self._has_prismatic = bool(self._tree_prismatic.any())
-        self._point_indices = {
-            link: np.array([self._tree_index[name] for name in ancestors if name in self._tree_index], dtype=int)
-            for link, ancestors in self._ancestors.items()
-        }
+        self._tree_prismatic = np.array(
+            [self._fk.j[name][0] == "prismatic" for name in self._tree_names], dtype=np.uint8
+        )
+        self._point_index_rows = {}
+        for link, ancestors in self._ancestors.items():
+            indices = [self._tree_index[name] for name in ancestors if name in self._tree_index]
+            row = np.full(len(self._tree_names), -1, dtype=np.int64)
+            row[:len(indices)] = indices
+            self._point_index_rows[link] = row
         self.current = self._pose(np.zeros(68))
         self._tree_derivatives(self.current.all_positions)
 
@@ -527,7 +530,7 @@ class Ve33Kinematics:
         frames = self._frames(state)
         derivative = self._tree_derivatives(state)
         points = np.empty((len(sites), 3))
-        jacobian = np.zeros((len(sites), 3, 12))
+        point_rows = []
         worlds = np.array([frames[child] for child in self._tree_children])
         axes = np.einsum("nij,nj->ni", worlds[:, :3, :3], self._tree_axes)
         for index, (link, local_point) in enumerate(sites):
@@ -543,10 +546,9 @@ class Ve33Kinematics:
                 raise ValueError("任务点必须为有限的局部三维实数米制坐标")
             point = frames[link][:3, :3] @ local + frames[link][:3, 3]
             points[index] = point
-            indices = self._point_indices[link]
-            tangents = np.cross(axes[indices], point - worlds[indices, :3, 3])
-            if self._has_prismatic:
-                prismatic = self._tree_prismatic[indices]
-                tangents[prismatic] = axes[indices[prismatic]]
-            jacobian[index] = tangents.T @ derivative[indices]
+            point_rows.append(self._point_index_rows[link])
+        jacobian = self._geometry.point_jacobian(
+            points, worlds, axes, derivative, np.asarray(point_rows, dtype=np.int64).reshape(len(sites), 68),
+            self._tree_prismatic,
+        )
         return points, jacobian

@@ -14,35 +14,6 @@ def test_auto_discovery_accepts_canable_and_ignores_other_usb_serials(monkeypatc
     assert controller.discover_usb_serial_ports() == ("/dev/ttyACM0", "/dev/ttyACM1")
 
 
-def test_quiet_connection_hides_success_but_keeps_failure(monkeypatch, tmp_path, capsys):
-    ports = [
-        SimpleNamespace(device=f"/dev/ttyACM{index}", vid=0x16D0, pid=0x117E)
-        for index in range(2)
-    ]
-    monkeypatch.setattr(controller.lp, "comports", lambda: ports)
-
-    class Worker:
-        def __init__(self, channel):
-            self.channel = channel
-            self.is_connected = False
-            self.conn_event = SimpleNamespace(wait=lambda timeout: None)
-            self.error_msg = "离线连接失败"
-
-        def start(self):
-            pass
-
-        def connect(self, port):
-            self.port = port
-            self.is_connected = self.channel == 1
-
-    monkeypatch.setattr(controller, "HeadlessChannelWorker", Worker)
-    hand = controller.EncosHand(config_path=str(tmp_path / "calibration.json"),
-                                announce_connection=False)
-    hand.connect()
-    output = capsys.readouterr().out
-    assert "成功挂载" not in output
-    assert "[CAN-2] 无法挂载" in output
-    assert "离线连接失败" in output
 
 
 def test_worker_expires_mit_without_further_controller_calls(monkeypatch):

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from wujihand2_force_glove.ve33_kinematics import Ve33Kinematics
+from motorhand_teleop.ve33_kinematics import Ve33Kinematics
 
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -12,7 +12,7 @@
 
 namespace {
 
-constexpr const char* capsule_name = "wujihand2_force_glove.ve33_geometry";
+constexpr const char* capsule_name = "motorhand_teleop.ve33_geometry";
 
 struct Buffer {
     Py_buffer view{};
@@ -404,10 +404,104 @@ PyObject* frames(PyObject*, PyObject* args) {
     Py_RETURN_NONE;
 }
 
+// Convert the already-validated CAD state without 68 Python generator calls.
+PyObject* state_vector(PyObject*, PyObject* args) {
+    PyObject *state, *names, *out_obj;
+    if (!PyArg_ParseTuple(args, "OOO:state_vector", &state, &names, &out_obj)) return nullptr;
+    if (!PyDict_CheckExact(state) || !PyTuple_CheckExact(names)) {
+        PyErr_SetString(PyExc_TypeError, "state and names must be a dict and tuple");
+        return nullptr;
+    }
+    Buffer out;
+    const Py_ssize_t shape[] = {PyTuple_GET_SIZE(names)};
+    if (!acquire(out, out_obj, "out", 'd', 1, shape, true)) return nullptr;
+    for (Py_ssize_t i = 0; i < shape[0]; ++i) {
+        PyObject* value = PyDict_GetItemWithError(state, PyTuple_GET_ITEM(names, i));
+        if (!value) {
+            if (PyErr_Occurred()) return nullptr;
+            out.put(i, 0.0);
+            continue;
+        }
+        double number;
+        if (PyFloat_Check(value)) {
+            number = PyFloat_AS_DOUBLE(value);
+        } else {
+            PyObject* converted = PyNumber_Float(value);
+            if (!converted) return nullptr;
+            number = PyFloat_AS_DOUBLE(converted);
+            Py_DECREF(converted);
+        }
+        out.put(i, number);
+    }
+    Py_RETURN_NONE;
+}
+
+PyObject* point_jacobian(PyObject*, PyObject* args) {
+    PyObject *points_obj, *worlds_obj, *axes_obj, *derivative_obj, *indices_obj, *prismatic_obj, *out_obj;
+    if (!PyArg_ParseTuple(args, "OOOOOOO:point_jacobian", &points_obj, &worlds_obj, &axes_obj,
+                          &derivative_obj, &indices_obj, &prismatic_obj, &out_obj)) return nullptr;
+    Buffer points, worlds, axes, derivative, indices, prismatic, out;
+    const Py_ssize_t point_shape[] = {-1, 3};
+    if (!acquire(points, points_obj, "points", 'd', 2, point_shape)) return nullptr;
+    const Py_ssize_t n = points.view.shape[0];
+    const Py_ssize_t world_shape[] = {68, 4, 4}, axes_shape[] = {68, 3};
+    const Py_ssize_t derivative_shape[] = {68, 12}, index_shape[] = {n, 68};
+    const Py_ssize_t prismatic_shape[] = {68}, output_shape[] = {n, 3, 12};
+    if (!acquire(worlds, worlds_obj, "worlds", 'd', 3, world_shape) ||
+        !acquire(axes, axes_obj, "axes", 'd', 2, axes_shape) ||
+        !acquire(derivative, derivative_obj, "derivative", 'd', 2, derivative_shape) ||
+        !acquire(indices, indices_obj, "indices", 'i', 2, index_shape) ||
+        !acquire(prismatic, prismatic_obj, "prismatic", 'B', 1, prismatic_shape) ||
+        !acquire(out, out_obj, "out", 'd', 3, output_shape, true) ||
+        !finite(points, "points") || !finite(worlds, "worlds") ||
+        !finite(axes, "axes") || !finite(derivative, "derivative")) return nullptr;
+    if (overlaps(out, points) || overlaps(out, worlds) || overlaps(out, axes) ||
+        overlaps(out, derivative) || overlaps(out, indices) || overlaps(out, prismatic)) {
+        PyErr_SetString(PyExc_ValueError, "out must not overlap inputs");
+        return nullptr;
+    }
+    for (Py_ssize_t i = 0; i < n * 68; ++i) {
+        const auto joint = indices.get<std::int64_t>(i);
+        if (joint < -1 || joint >= 68) {
+            PyErr_SetString(PyExc_ValueError, "indices contains an invalid tree joint");
+            return nullptr;
+        }
+    }
+    for (Py_ssize_t p = 0; p < n; ++p) {
+        double result[3][12] = {};
+        for (Py_ssize_t k = 0; k < 68; ++k) {
+            const auto joint = indices.get<std::int64_t>(p * 68 + k);
+            if (joint == -1) continue;
+            double axis[3], offset[3], tangent[3];
+            for (int a = 0; a < 3; ++a) {
+                axis[a] = axes.get<double>(joint * 3 + a);
+                offset[a] = points.get<double>(p * 3 + a) - worlds.get<double>(joint * 16 + a * 4 + 3);
+            }
+            if (prismatic.get<std::uint8_t>(joint)) {
+                for (int a = 0; a < 3; ++a) tangent[a] = axis[a];
+            } else {
+                tangent[0] = axis[1] * offset[2] - axis[2] * offset[1];
+                tangent[1] = axis[2] * offset[0] - axis[0] * offset[2];
+                tangent[2] = axis[0] * offset[1] - axis[1] * offset[0];
+            }
+            for (int a = 0; a < 3; ++a)
+                for (int q = 0; q < 12; ++q)
+                    result[a][q] += tangent[a] * derivative.get<double>(joint * 12 + q);
+        }
+        for (int a = 0; a < 3; ++a)
+            for (int q = 0; q < 12; ++q)
+                out.put((p * 3 + a) * 12 + q, result[a][q]);
+    }
+    Py_RETURN_NONE;
+}
+
+
 PyMethodDef methods[] = {
     {"create", create, METH_VARARGS, "Create an owned, immutable topology and reusable FK workspace."},
     {"evaluate", evaluate, METH_VARARGS, "Write point-closure residuals and the original analytic Jacobian."},
     {"frames", frames, METH_VARARGS, "Write world frames in topology order."},
+    {"state_vector", state_vector, METH_VARARGS, "Convert a CAD name-to-value state into its ordered vector."},
+    {"point_jacobian", point_jacobian, METH_VARARGS, "Batch point tangents and closed-chain derivatives."},
     {nullptr, nullptr, 0, nullptr}
 };
 

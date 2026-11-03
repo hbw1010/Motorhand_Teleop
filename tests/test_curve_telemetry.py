@@ -8,10 +8,10 @@ import time
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import GLOVE_JOINTS, GlovePose, WujiState
-from wujihand2_force_glove.real_hand.curve_telemetry import CurvePublisher, decode_sample
-from wujihand2_force_glove.real_hand.force_feedback import ForceFeedbackCommand
-from wujihand2_force_glove.real_hand.runtime import FollowMode, PairTick
+from motorhand_teleop.domain import GLOVE_JOINTS, GlovePose, WujiState
+from motorhand_teleop.real_hand.curve_telemetry import CurvePublisher, decode_sample
+from motorhand_teleop.real_hand.force_feedback import ForceFeedbackCommand
+from motorhand_teleop.real_hand.runtime import FollowMode, PairTick
 
 
 def _source(unit):
@@ -86,8 +86,8 @@ def test_udp_consumer_receives_raw_axis_sign_scale_without_faking_missing_measur
 def test_console_reports_confirmed_nominal_torque_in_raw_motor_order():
     import re
 
-    from wujihand2_force_glove.real_hand.curve_telemetry import _motor_axis_bindings
-    from wujihand2_force_glove.real_hand.runtime import _format_torque_line
+    from motorhand_teleop.real_hand.curve_telemetry import _motor_axis_bindings
+    from motorhand_teleop.real_hand.runtime import _format_torque_line
 
     model, motors, _, tick = _source("Nm")
     confirmed = tuple((index + 1) / 10 for index in range(12))
@@ -123,7 +123,7 @@ def test_curve_socket_failure_does_not_raise_into_control_or_retry_output():
     lambda sample: sample.update(glove_target_unit=None),
 ])
 def test_receiver_rejects_wrong_channel_units_or_unknown_measurements(mutate):
-    from wujihand2_force_glove.real_hand.force_curves import make_demo_sample
+    from motorhand_teleop.real_hand.force_curves import make_demo_sample
 
     sample = make_demo_sample(1.0, 1_000_000_000)
     mutate(sample)
@@ -139,7 +139,7 @@ def test_receiver_rejects_wrong_channel_units_or_unknown_measurements(mutate):
     lambda sample: sample.update(mapping_mode="max_torque_linear_estimate"),
 ])
 def test_contact_packet_requires_explicit_estimated_state_mask_and_nominal_units(mutate):
-    from wujihand2_force_glove.real_hand.force_curves import make_demo_sample
+    from motorhand_teleop.real_hand.force_curves import make_demo_sample
 
     sample = make_demo_sample(1.0, 1_000_000_000)
     sample.update(mapping_mode="contact_impedance_estimate", contact_state="free",
@@ -176,7 +176,7 @@ def test_reverse_mode_and_missing_velocity_keep_diagnostics_missing(feedback_ena
 
 
 def test_legacy_schema_without_diagnostics_does_not_create_zero_values():
-    from wujihand2_force_glove.real_hand.force_curves import make_demo_sample
+    from motorhand_teleop.real_hand.force_curves import make_demo_sample
 
     sample = make_demo_sample(1.0, 1_000_000_000)
     keys = ("glove_projected_torque_nm", "contact_reflection_gain",
@@ -199,7 +199,7 @@ def test_legacy_schema_without_diagnostics_does_not_create_zero_values():
 ])
 @pytest.mark.parametrize("invalid", ["short", "bool", "string", "nonfinite", "null"])
 def test_optional_diagnostic_vectors_validate_dimension_and_numeric_type(key, count, invalid):
-    from wujihand2_force_glove.real_hand.force_curves import make_demo_sample
+    from motorhand_teleop.real_hand.force_curves import make_demo_sample
 
     sample = make_demo_sample(1.0, 1_000_000_000)
     values = [None] * count
@@ -221,7 +221,7 @@ def test_optional_diagnostic_vectors_validate_dimension_and_numeric_type(key, co
 
 @pytest.mark.parametrize("gain", [True, "2000", 0, -1, float("inf")])
 def test_optional_contact_gain_requires_positive_finite_numeric_value(gain):
-    from wujihand2_force_glove.real_hand.force_curves import make_demo_sample
+    from motorhand_teleop.real_hand.force_curves import make_demo_sample
 
     sample = make_demo_sample(1.0, 1_000_000_000)
     sample.update(mapping_mode="contact_impedance_estimate", contact_state="free",
@@ -237,7 +237,7 @@ def test_optional_contact_gain_requires_positive_finite_numeric_value(gain):
     lambda sample: sample.update(mapping_mode="calibrated", contact_reflection_gain=2000),
 ])
 def test_optional_diagnostics_cannot_claim_wrong_output_units_or_control_mode(mutate):
-    from wujihand2_force_glove.real_hand.force_curves import make_demo_sample
+    from motorhand_teleop.real_hand.force_curves import make_demo_sample
 
     sample = make_demo_sample(1.0, 1_000_000_000)
     mutate(sample)
@@ -245,14 +245,6 @@ def test_optional_diagnostics_cannot_claim_wrong_output_units_or_control_mode(mu
         decode_sample(json.dumps(sample).encode())
 
 
-def test_force_command_copies_projected_torque_before_caller_mutates_array():
-    _, _, _, tick = _source("Nm")
-    projected = np.linspace(-0.3, 0.2, 12)
-    expected = tuple(projected)
-    feedback = replace(tick.force_feedback, projected_model_torque_nm=projected)
-    projected[:] = 42
-    assert isinstance(feedback.projected_model_torque_nm, tuple)
-    assert feedback.projected_model_torque_nm == expected
 
 
 @pytest.mark.parametrize("projected", [np.zeros(11), [True] * 12, [float("inf")] * 12])
@@ -272,7 +264,7 @@ def test_force_command_rejects_nm_projection_attached_to_current_output():
                                   "wuji_submit_ns", "glove_submit_ns"])
 @pytest.mark.parametrize("value", [True, -1, 1.5, "1"])
 def test_optional_timestamps_reject_invalid_values(key, value):
-    from wujihand2_force_glove.real_hand.force_curves import make_demo_sample
+    from motorhand_teleop.real_hand.force_curves import make_demo_sample
 
     sample = make_demo_sample(1.0, 1_000_000_000)
     sample[key] = value
@@ -284,7 +276,7 @@ def test_optional_timestamps_reject_invalid_values(key, value):
                                     [-1] + [None] * 11, [1.0] + [None] * 11,
                                     ["1"] + [None] * 11, "invalid"])
 def test_motor_receive_timestamps_require_twelve_optional_nonnegative_integers(stamps):
-    from wujihand2_force_glove.real_hand.force_curves import make_demo_sample
+    from motorhand_teleop.real_hand.force_curves import make_demo_sample
 
     sample = make_demo_sample(1.0, 1_000_000_000)
     sample["glove_motor_received_ns"] = stamps

@@ -58,6 +58,9 @@ class PlaybackClock:
                 self._speed_denominator,
             )
             self._position_ns = min(self.duration_ns, self._position_ns + advance)
+        elif self._playing and self._last_ns < self._resume_ns:
+            # 等待期间保留尚未完成的过渡时长。
+            self._resume_ns += now_ns - self._last_ns
         self._last_ns = now_ns
         return self._position_ns
 
@@ -105,7 +108,8 @@ class TerminalKeys:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="回放录制的Wuji实测轨迹，支持手套跟随和按键力反馈接管")
     parser.add_argument("trajectory", type=Path, help="录制的完整JSONL轨迹文件")
-    parser.add_argument("--wuji-serial", help="真机序列号；执行时必须显式指定并匹配录制身份")
+    parser.add_argument("--wuji-serial", help="可选SN；默认使用录制时的设备身份")
+    parser.add_argument("--wuji-address", help="可选设备地址；默认自动发现")
     parser.add_argument("--approved-firmware", help="批准的真实固件版本；执行时必须与设备及录制身份一致")
     parser.add_argument("--hand", choices=("left", "right"), default="right")
     parser.add_argument("--glove-hand", choices=("left", "right"), default="right")
@@ -157,6 +161,7 @@ def _run(args, trajectory: RecordedTrajectory, keys: TerminalKeys | None) -> int
 
     driver = WujiHand2HardwareDriver(
         hand=args.hand, serial_number=args.wuji_serial,
+        address=getattr(args, "wuji_address", "") or "",
         approved_firmware_version=args.approved_firmware,
     )
     glove = feedback = loop = worker = None
@@ -212,13 +217,14 @@ def _run(args, trajectory: RecordedTrajectory, keys: TerminalKeys | None) -> int
             print("即将使能Wuji回放；Ctrl+C停止。", flush=True)
         loop.enable()
         enabled = True
+        print(f"启动平滑过渡 {args.transition:.2f} 秒；手套逆解未就绪时回放与过渡暂停。", flush=True)
         # 首个周期先从真实Wuji反馈启动平滑过渡；轨迹时间从该周期后起算。
         first = loop.step(inference_positions_rad=trajectory.positions_at(0))
         cursor = PlaybackClock(duration_ns=trajectory.duration_ns,
                                transition_ns=round(args.transition * 1e9),
                                start_ns=time.monotonic_ns(), speed=args.speed)
         print(_format_status(first, 0, trajectory.duration_ns, bindings), flush=True)
-        inverse_ready = True
+        inverse_ready = first.inverse_fresh
         next_report = time.monotonic_ns() + 1_000_000_000
         while True:
             cycle_ns = time.monotonic_ns()
@@ -297,8 +303,13 @@ def main(argv: list[str] | None = None) -> int:
     if not args.execute:
         print("仅检查文件；未连接、使能或控制设备。", flush=True)
         return 0
-    if not args.wuji_serial or not args.approved_firmware:
-        parser.error("--execute必须显式提供--wuji-serial和--approved-firmware")
+    if not args.approved_firmware:
+        parser.error("--execute必须提供--approved-firmware")
+    args.wuji_serial = args.wuji_serial or trajectory.serial_number
+    if not args.wuji_address:
+        from .preflight import select_device
+        selected = select_device(serial_number=args.wuji_serial)
+        args.wuji_address = selected["address"]
     try:
         if args.with_glove:
             with TerminalKeys(sys.stdin.fileno()) as keys:

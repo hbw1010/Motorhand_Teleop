@@ -8,14 +8,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import GLOVE_JOINTS, WujiState
-from wujihand2_force_glove.feedback import CalibrationRequired
-from wujihand2_force_glove.real_hand.force_feedback import (
+from motorhand_teleop.domain import GLOVE_JOINTS, WujiState
+from motorhand_teleop.feedback import CalibrationRequired
+from motorhand_teleop.real_hand.force_feedback import (
     ForceFeedbackCalibration,
     ForceFeedbackController,
 )
-from wujihand2_force_glove.real_hand.motor_hand import EncosGloveHardwareDriver, EncosGloveState
-from wujihand2_force_glove.retargeting import GloveWujiRetargetPipeline, default_retarget_config
+from motorhand_teleop.real_hand.motor_hand import EncosGloveHardwareDriver, EncosGloveState
+from motorhand_teleop.retargeting import GloveWujiRetargetPipeline, default_retarget_config
 
 ROOT = Path(__file__).parents[1]
 ASSETS = ROOT / "assets" / "hand_motor_ve33"
@@ -468,7 +468,7 @@ def test_glove_torque_constant_is_independent_from_wuji_current_to_torque(active
 
 
 def test_nominal_zero_quantization_ack_does_not_accumulate_force_or_mix_amp_units(rig):
-    from wujihand2_force_glove.real_hand.force_linear import MaxTorqueLinearConfig
+    from motorhand_teleop.real_hand.force_linear import MaxTorqueLinearConfig
 
     config = replace(
         MaxTorqueLinearConfig.from_json(ROOT / "config/feedback/max-torque-linear-right.json"),
@@ -511,7 +511,7 @@ def test_nominal_zero_quantization_ack_does_not_accumulate_force_or_mix_amp_unit
 
 @pytest.mark.parametrize("mode", ["calibrated", "max_torque_linear_estimate"])
 def test_pose_change_pauses_only_reflection_then_recovers_from_background_refresh(rig, mode):
-    from wujihand2_force_glove.real_hand.force_linear import MaxTorqueLinearConfig
+    from motorhand_teleop.real_hand.force_linear import MaxTorqueLinearConfig
 
     context = multiprocessing.get_context("spawn")
     entered, release, block = context.Event(), context.Event(), context.Event()

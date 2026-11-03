@@ -4486,7 +4486,7 @@ packages:
   size: 24791
   timestamp: 1792622774790
 - pypi: ./
-  name: wujihand2-force-glove
+  name: motorhand-teleop
   requires_dist:
   - scipy>=1.11,<2
   - python-can>=4.3

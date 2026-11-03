@@ -7,5 +7,6 @@ __pycache__/
 logs/
 MUJOCO_LOG.TXT
 recordings/
+assets/assets.zip
 build/
-src/wujihand2_force_glove/_ve33_geometry*.so
+src/motorhand_teleop/_ve33_geometry*.so

@@ -2,15 +2,15 @@ from pathlib import Path
 
 import numpy as np
 
-from wujihand2_force_glove.bidirectional import (
+from motorhand_teleop.bidirectional import (
     BidirectionalRetargeter,
     GloveInverseSolver,
     GloveTaskModel,
     Hand2TaskModel,
 )
-from wujihand2_force_glove.domain import GLOVE_JOINTS
-from wujihand2_force_glove.landmarks import Ve33LandmarkSource
-from wujihand2_force_glove.retargeting import (
+from motorhand_teleop.domain import GLOVE_JOINTS
+from motorhand_teleop.landmarks import Ve33LandmarkSource
+from motorhand_teleop.retargeting import (
     GloveWujiRetargetPipeline,
     default_retarget_config,
 )

@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 import yaml
 
-from wujihand2_force_glove import _ve33_geometry as native
-from wujihand2_force_glove.ve33_geometry import Ve33ClosureGeometry
+from motorhand_teleop import _ve33_geometry as native
+from motorhand_teleop.ve33_geometry import Ve33ClosureGeometry
 
 
 ROOT = Path(__file__).parents[1]
@@ -274,3 +274,61 @@ def test_native_frames_rejects_shape_before_overwrite():
     native.frames(model, state, fresh)
     np.testing.assert_array_equal(frames, saved)
     np.testing.assert_allclose(fresh[0, :2, :2], [[0., 1.], [-1., 0.]], atol=2e-15)
+
+
+@pytest.mark.parametrize("count", [0, 1, 7])
+def test_point_jacobian_matches_independent_numpy_geometry(count):
+    rng = np.random.default_rng(42)
+    points = rng.normal(size=(count, 3))
+    worlds = rng.normal(size=(68, 4, 4))
+    axes = rng.normal(size=(68, 3))
+    derivative = rng.normal(size=(68, 12))
+    indices = np.full((count, 68), -1, dtype=np.int64)
+    for row in indices:
+        row[:6] = [0, 3, 11, 20, 51, 67]
+    prismatic = np.zeros(68, dtype=np.uint8)
+    prismatic[[3, 51]] = 1
+    actual = np.empty((count, 3, 12))
+    native.point_jacobian(points, worlds, axes, derivative, indices, prismatic, actual)
+    expected = np.zeros_like(actual)
+    for index, point in enumerate(points):
+        joints = indices[index][indices[index] >= 0]
+        tangents = np.cross(axes[joints], point - worlds[joints, :3, 3])
+        tangents[prismatic[joints] != 0] = axes[joints[prismatic[joints] != 0]]
+        expected[index] = tangents.T @ derivative[joints]
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
+@pytest.mark.parametrize("bad", ["index", "dtype", "nonfinite", "overlap"])
+def test_point_jacobian_rejects_invalid_input_without_partial_output(bad):
+    shared = np.full(36, 17.0)
+    points = np.ones((1, 3))
+    worlds = np.zeros((68, 4, 4))
+    axes = np.ones((68, 3))
+    derivative = np.ones((68, 12))
+    indices = np.full((1, 68), -1, dtype=np.int64)
+    prismatic = np.zeros(68, dtype=np.uint8)
+    out = shared.reshape(1, 3, 12)
+    if bad == "index":
+        indices[0, 0] = 68
+    elif bad == "dtype":
+        indices = indices.astype(np.int32)
+    elif bad == "nonfinite":
+        axes[0, 0] = np.nan
+    else:
+        points = shared[:3].reshape(1, 3)
+    with pytest.raises((TypeError, ValueError)):
+        native.point_jacobian(points, worlds, axes, derivative, indices, prismatic, out)
+    np.testing.assert_array_equal(out, np.full((1, 3, 12), 17.0))
+
+
+def test_state_vector_preserves_name_order_missing_and_unknown_coordinates():
+    state = {"b": np.float64(-2.25), "a": "1.5", "unrelated": object()}
+    out = np.full(4, 99.0)
+    native.state_vector(state, ("c", "b", "a", "missing"), out)
+    np.testing.assert_array_equal(out, [0.0, -2.25, 1.5, 0.0])
+
+
+def test_state_vector_rejects_non_numeric_coordinates():
+    with pytest.raises((TypeError, ValueError)):
+        native.state_vector({"a": object()}, ("a",), np.empty(1))

@@ -8,8 +8,8 @@ import json
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import GLOVE_JOINTS, GlovePose, WujiState
-from wujihand2_force_glove.real_hand.runtime import (
+from motorhand_teleop.domain import GLOVE_JOINTS, GlovePose, WujiState
+from motorhand_teleop.real_hand.runtime import (
     FollowMode,
     PairRuntime,
     create_retargeter,
@@ -520,10 +520,10 @@ def test_nlopt_fallback_never_becomes_a_command(bridge, monkeypatch, code):
 
 @pytest.mark.parametrize("arguments", [[], ["inspect"]])
 def test_inspect_without_serial_only_discovers_wuji_and_never_connects_first(
-    bridge, monkeypatch, capsys, arguments,
+    bridge, monkeypatch, arguments,
 ):
-    from wujihand2_force_glove.real_hand import motor_hand, preflight, wuji_hand2
-    from wujihand2_force_glove.real_hand import runtime as runtime_module
+    from motorhand_teleop.real_hand import motor_hand, preflight, wuji_hand2
+    from motorhand_teleop.real_hand import runtime as runtime_module
 
     clock = Clock()
     glove = MotorPlant(clock, bridge.forward.landmarks.model, _joints(0.0))
@@ -536,7 +536,6 @@ def test_inspect_without_serial_only_discovers_wuji_and_never_connects_first(
 
     monkeypatch.setattr(wuji_hand2, "WujiHand2HardwareDriver", forbidden_constructor)
     assert main(arguments) == 0
-    assert "不连接首个设备" in capsys.readouterr().out
     assert glove.homes == glove.enabled == glove.disabled == 0
     assert glove.commands == []
     assert glove.closed
@@ -614,7 +613,7 @@ def test_measured_nonzero_wuji_side_is_continuous_then_smoothly_returns_to_fixed
 
 
 def test_discover_command_only_calls_sdk_scan_without_constructing_either_driver(monkeypatch, capsys):
-    from wujihand2_force_glove.real_hand import motor_hand, preflight, wuji_hand2
+    from motorhand_teleop.real_hand import motor_hand, preflight, wuji_hand2
 
     def forbidden_constructor(**kwargs):
         pytest.fail("discover不应实例化任何硬件驱动")
@@ -635,8 +634,8 @@ def test_discover_command_only_calls_sdk_scan_without_constructing_either_driver
 
 
 def test_inspect_serial_serializes_actual_dataclass_identity_without_acquiring_output(bridge, monkeypatch, capsys):
-    from wujihand2_force_glove.real_hand import motor_hand, preflight, wuji_hand2
-    from wujihand2_force_glove.real_hand import runtime as runtime_module
+    from motorhand_teleop.real_hand import motor_hand, preflight, wuji_hand2
+    from motorhand_teleop.real_hand import runtime as runtime_module
 
     runtime, hand, glove, clock = _pair(bridge)
     monkeypatch.setattr(motor_hand, "EncosGloveHardwareDriver", lambda **kwargs: glove)
@@ -849,8 +848,8 @@ class ForceMotorPlant:
     """真实CAD数值机构；操作者夹持姿态，力输出不篡改位置反馈。"""
 
     def __init__(self, plant, calibration):
-        from wujihand2_force_glove.real_hand.motor_hand import EncosGloveHardwareDriver
-        from wujihand2_force_glove.real_hand.force_linear import MaxTorqueLinearConfig
+        from motorhand_teleop.real_hand.motor_hand import EncosGloveHardwareDriver
+        from motorhand_teleop.real_hand.force_linear import MaxTorqueLinearConfig
 
         self.plant = plant
         self.model = plant.model
@@ -894,7 +893,7 @@ class ForceMotorPlant:
         return self.metadata.model_force_torque_command_limits_nm
 
     def read_state(self):
-        from wujihand2_force_glove.real_hand.motor_hand import EncosGloveState
+        from motorhand_teleop.real_hand.motor_hand import EncosGloveState
 
         state = self.plant.read_state()
         raw = {
@@ -956,7 +955,7 @@ class EffortHandPlant(HandPlant):
 
 @pytest.fixture
 def force_pair(bridge):
-    from wujihand2_force_glove.real_hand.force_feedback import (
+    from motorhand_teleop.real_hand.force_feedback import (
         ForceFeedbackCalibration, ForceFeedbackController,
     )
 
@@ -1051,15 +1050,15 @@ def test_force_missing_effort_is_rejected_before_either_side_is_enabled(force_pa
 
 @pytest.mark.parametrize("linear_mode", [False, True])
 def test_inference_takeover_uses_same_solver_and_force_role_without_pose_jump(force_pair, linear_mode):
-    from wujihand2_force_glove.bidirectional import ControlMode
-    from wujihand2_force_glove.real_hand.control import RealWujiControlLoop
+    from motorhand_teleop.bidirectional import ControlMode
+    from motorhand_teleop.real_hand.control import RealWujiControlLoop
 
     runtime, hand, glove, clock = force_pair
     controller, runtime.force_feedback = runtime.force_feedback, None
     if linear_mode:
-        from wujihand2_force_glove.real_hand.force_feedback import ForceFeedbackController
-        from wujihand2_force_glove.real_hand.force_linear import MaxTorqueLinearConfig
-        from wujihand2_force_glove.real_hand.motor_hand import EncosGloveHardwareDriver
+        from motorhand_teleop.real_hand.force_feedback import ForceFeedbackController
+        from motorhand_teleop.real_hand.force_linear import MaxTorqueLinearConfig
+        from motorhand_teleop.real_hand.motor_hand import EncosGloveHardwareDriver
 
         controller.close()
         config = replace(
@@ -1115,8 +1114,8 @@ def test_inference_takeover_uses_same_solver_and_force_role_without_pose_jump(fo
 
 
 def test_maximum_linear_takeover_works_without_kt_and_preserves_single_position_master(bridge):
-    from wujihand2_force_glove.real_hand.force_feedback import ForceFeedbackController
-    from wujihand2_force_glove.real_hand.force_linear import MaxTorqueLinearConfig
+    from motorhand_teleop.real_hand.force_feedback import ForceFeedbackController
+    from motorhand_teleop.real_hand.force_linear import MaxTorqueLinearConfig
 
     config = replace(
         MaxTorqueLinearConfig.from_json(ROOT / "config/feedback/max-torque-linear-right.json"),

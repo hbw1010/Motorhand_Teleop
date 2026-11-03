@@ -87,6 +87,10 @@ class Ve33ClosureGeometry:
         )
 
     def _state(self, state: Mapping[str, float]) -> np.ndarray:
+        if type(state) is dict:
+            result = np.empty(len(self._tree_names), dtype=np.float64)
+            native.state_vector(state, self._tree_names, result)
+            return result
         return np.fromiter((state.get(name, 0.0) for name in self._tree_names),
                            dtype=np.float64, count=len(self._tree_names))
 
@@ -116,4 +120,10 @@ class Ve33ClosureGeometry:
         native.frames(self._kernel, self._state(state), frames)
         result = {link: frames[index] for link, index in self._child_nodes.items()}
         result.update({link: np.eye(4) for link in self._root_links})
+        return result
+
+    def point_jacobian(self, points, worlds, axes, derivative, indices, prismatic):
+        """批量计算任务点树雅可比与闭链导数的乘积。"""
+        result = np.empty((len(points), 3, 12), dtype=np.float64)
+        native.point_jacobian(points, worlds, axes, derivative, indices, prismatic, result)
         return result

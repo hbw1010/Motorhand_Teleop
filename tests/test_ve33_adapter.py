@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import GLOVE_JOINTS
-from wujihand2_force_glove.ve33_adapter import Ve33GloveModel
+from motorhand_teleop.domain import GLOVE_JOINTS
+from motorhand_teleop.ve33_adapter import Ve33GloveModel
 
 
 ROOT = Path(__file__).parents[1]

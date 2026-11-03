@@ -57,7 +57,10 @@ if(REAL_HAND_BUILD_SDK)
     add_executable(real_hand_c_smoke tests/c_smoke.c)
     # 源码仍由C编译器检查；最终链接需要C++运行库和官方Linux SDK的udev依赖。
     # Pixi工具链sysroot不包含宿主udev，明确找运行该固定SDK的宿主库。
-    find_library(WUJI_UDEV_LIBRARY NAMES udev libudev.so.1 NO_CMAKE_FIND_ROOT_PATH)
+    find_library(WUJI_UDEV_LIBRARY NAMES udev libudev.so.1
+      PATHS "/lib/${CMAKE_HOST_SYSTEM_PROCESSOR}-linux-gnu"
+            "/usr/lib/${CMAKE_HOST_SYSTEM_PROCESSOR}-linux-gnu"
+      NO_CMAKE_FIND_ROOT_PATH)
     if(NOT WUJI_UDEV_LIBRARY)
       message(FATAL_ERROR "官方Linux SDK需要宿主libudev；请安装系统libudev开发库")
     endif()

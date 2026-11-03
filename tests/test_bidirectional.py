@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.bidirectional import (
+from motorhand_teleop.bidirectional import (
     BidirectionalStateBus,
     ControlMode,
     DeviceState,

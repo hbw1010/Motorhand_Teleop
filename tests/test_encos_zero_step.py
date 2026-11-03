@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from wujihand2_force_glove import encos_zero_step as zero
-from wujihand2_force_glove.domain import GLOVE_JOINTS
+from motorhand_teleop import encos_zero_step as zero
+from motorhand_teleop.domain import GLOVE_JOINTS
 
 
 class ReadOnlyHand:

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from wujihand2_force_glove.retargeting import (
+from motorhand_teleop.retargeting import (
     WujiHand2Retargeter,
     wuji_hand2_joint_names,
 )

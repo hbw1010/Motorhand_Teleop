@@ -39,7 +39,7 @@ Wuji C ABI6读取同帧位置、速度rad/s和effort电流A，可选量不可用
 
 **双向求解**：正向和逆向共用 canonical 21点 `HandTaskState`。手套主导时使用 `Glove -> Hand2`，推理主导或同步时可计算 `Hand2 -> Glove` 影子目标；任意时刻只有一个位置控制主源，切换必须经过无扰过渡。并行计算不等于并行发送控制命令。
 
-**真机模块**：`src/wujihand2_force_glove/real_hand/` 并列放置两侧驱动、C ABI、
+**真机模块**：`src/motorhand_teleop/real_hand/` 并列放置两侧驱动、C ABI、
 外部推理控制周期和双向真实反馈运行器，无 DexGlove 运行时依赖。
 
 **主导方式**：`PairRuntime` 默认两种模式只写位置跟随端；有真实标定并显式启用

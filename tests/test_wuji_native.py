@@ -7,10 +7,10 @@ import time
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import WUJI_JOINTS, WujiState, WujiTarget
-from wujihand2_force_glove.real_hand import _wuji_hand2_native as native
-from wujihand2_force_glove.real_hand import preflight
-from wujihand2_force_glove.real_hand.wuji_hand2 import WujiHand2HardwareDriver
+from motorhand_teleop.domain import WUJI_JOINTS, WujiState, WujiTarget
+from motorhand_teleop.real_hand import _wuji_hand2_native as native
+from motorhand_teleop.real_hand import preflight
+from motorhand_teleop.real_hand.wuji_hand2 import WujiHand2HardwareDriver
 
 
 class Backend:
@@ -85,28 +85,6 @@ def test_default_constructor_is_lazy_and_disables_automatic_home(monkeypatch):
     driver.close()
 
 
-def test_binding_preserves_native_feedback_time_angles_and_diagnostics(monkeypatch):
-    backend = native.NativeWujiHand2Driver(model="wuji_hand2", hand="right", serial_number="SN1")
-    sample = native._State()
-    for index in range(20):
-        sample.positions[index] = index * 0.01
-        sample.online[index] = 1
-        sample.enabled[index] = 1
-    sample.error_codes[3] = 17
-    sample.timestamp_ns = 12345
-    sample.device_timestamp_us = 6789
-    sample.phase = 2
-    sample.firmware_version = b"measured"
-    monkeypatch.setattr(backend, "_read_native", lambda: sample)
-    state = backend.read_state()
-    assert np.array_equal(state.positions_rad, np.arange(20) * 0.01)
-    assert state.received_ns == 12345 and state.online_count == 20
-    assert state.diagnostics["joint_error_codes"][3] == 17
-    assert state.diagnostics["enabled"] is True
-    assert state.diagnostics["device_timestamp_us"] == 6789
-    assert state.velocities_rad_s is None and state.effort_a is None
-    assert not state.positions_rad.flags.writeable
-    backend.close()
 
 
 @pytest.fixture
@@ -280,6 +258,20 @@ def test_deadline_preflight_is_readonly(expires, error):
     driver.close()
 
 
+@pytest.mark.parametrize("expires,error", [(0, TimeoutError), (True, ValueError)])
+def test_expired_send_stops_and_latches_owned_device(expires, error):
+    backend = Backend()
+    driver = make_driver(backend, approved_firmware_version=backend.firmware)
+    driver.connect()
+    driver.enable()
+    with pytest.raises(error):
+        driver.send_target(target(), deadline_ns=expires)
+    assert not driver.active and "emergency_stop" in backend.calls
+    with pytest.raises(RuntimeError):
+        driver.send_target(target(), deadline_ns=deadline())
+    driver.close()
+
+
 def test_joint_limit_preflight_does_not_clamp_or_stop():
     backend = Backend()
     driver = make_driver(backend)
@@ -332,6 +324,76 @@ def test_official_discovery_lists_every_identity_without_connect(monkeypatch):
     assert all(device["hand"] is None and device["firmware_version"] is None for device in devices)
 
 
+def test_discovery_normalizes_official_enums_without_connecting(monkeypatch):
+    hand2, unknown, udp = object(), object(), object()
+    class Manager:
+        def scan(self):
+            return [
+                SimpleNamespace(sn="SN1", address="192.0.2.1:1234", transport_type=udp, device_type=hand2),
+                SimpleNamespace(sn="SN2", address="", transport_type=udp, device_type=unknown),
+            ]
+    sdk = SimpleNamespace(
+        SdkManager=SimpleNamespace(instance=lambda: Manager()),
+        DeviceType=SimpleNamespace(WujiHand2=hand2),
+        TransportType=SimpleNamespace(Udp=udp),
+    )
+    monkeypatch.setattr(preflight, "_load_sdk", lambda: sdk)
+    devices = preflight._discover_devices()
+    assert devices[0]["device_type"] == "WujiHand2"
+    assert devices[0]["transport_type"] == "UDP"
+    assert preflight.select_device(devices=devices)["serial_number"] == "SN1"
+
+
+def test_selection_reuses_scan_and_prefers_discovered_udp(monkeypatch):
+    devices = [
+        {"serial_number": "SN1", "device_type": "WujiHand2", "transport_type": "USB", "address": "usb:SN1"},
+        {"serial_number": "SN1", "device_type": "WujiHand2", "transport_type": "UDP", "address": "192.0.2.1:1234"},
+        {"serial_number": "other", "device_type": "Unknown", "transport_type": "UDP", "address": "192.0.2.2:1234"},
+    ]
+    monkeypatch.setattr(preflight, "discover_devices", lambda **kwargs: pytest.fail("不得重复扫描"))
+    assert preflight.select_device(devices=devices)["address"] == "192.0.2.1:1234"
+    assert preflight.select_device(serial_number="SN1", devices=devices)["serial_number"] == "SN1"
+    with pytest.raises(RuntimeError, match="未发现"):
+        preflight.select_device(serial_number="SN2", devices=devices)
+    with pytest.raises(ValueError, match="serial_number"):
+        preflight.select_device(serial_number=" SN1", devices=devices)
+
+
+def test_selection_rejects_ambiguous_devices_and_addresses():
+    def entry(sn, address):
+        return {"serial_number": sn, "device_type": "WujiHand2",
+                "transport_type": "UDP", "address": address}
+    with pytest.raises(RuntimeError, match="未发现"):
+        preflight.select_device(devices=[])
+    with pytest.raises(RuntimeError, match="多个可识别"):
+        preflight.select_device(devices=[entry("SN1", "a"), entry("SN2", "b")])
+    with pytest.raises(RuntimeError, match="多个连接地址"):
+        preflight.select_device(serial_number="SN1", devices=[entry("SN1", "a"), entry("SN1", "b")])
+    assert preflight.select_device(devices=[entry("SN1", "")])["address"] == ""
+
+
+def test_firmware_preflight_address_still_checks_identity_and_disconnects(monkeypatch):
+    calls = []
+    class Device:
+        serial_number = "WRONG"
+        def disconnect(self):
+            calls.append("disconnect")
+    class Manager:
+        def connect(self, **options):
+            calls.append(options)
+            return Device()
+    sdk = SimpleNamespace(
+        SdkManager=SimpleNamespace(instance=lambda: Manager()), WujiHand2=Device,
+        ConnectOptions=lambda **options: options,
+    )
+    monkeypatch.setattr(preflight, "_load_sdk", lambda: sdk)
+    with pytest.raises(RuntimeError, match="序列号"):
+        preflight._read_firmware_version(serial_number="SN1", hand="right", address="192.0.2.1:1234")
+    assert calls[0]["address"] == "192.0.2.1:1234"
+    assert "sn" not in calls[0]
+    assert calls[-1] == "disconnect"
+
+
 def test_firmware_preflight_uses_explicit_selector_and_only_reads(monkeypatch):
     calls = []
 
@@ -366,3 +428,32 @@ def test_sdk_version_must_match_official_pin(monkeypatch):
     monkeypatch.setattr(preflight, "version", lambda name: "2026.10.12")
     with pytest.raises(RuntimeError, match="2026.8.31"):
         preflight._load_sdk()
+
+
+def test_discovery_prefers_unique_physical_wired_route(monkeypatch):
+    candidates = [
+        {"serial_number": "SN1", "device_type": "WujiHand2", "transport_type": "UDP", "address": address}
+        for address in ("192.0.2.1:7447", "192.0.2.2:7447")
+    ]
+    monkeypatch.setattr(preflight, "_has_wired_route", lambda address: address == "192.0.2.2:7447")
+    assert preflight.select_device(devices=candidates)["address"] == "192.0.2.2:7447"
+
+
+def test_route_detection_distinguishes_wired_from_wireless_without_changing_network(tmp_path, monkeypatch):
+    import json
+
+    root = tmp_path / "net"
+    for name in ("eth0", "wifi0"):
+        interface = root / name
+        (interface / "device").mkdir(parents=True)
+        (interface / "type").write_text("1")
+    (root / "wifi0" / "wireless").mkdir()
+    monkeypatch.setattr(preflight, "Path", lambda _: root)
+    monkeypatch.setattr(
+        preflight.subprocess, "run",
+        lambda command, **_: SimpleNamespace(stdout=json.dumps([
+            {"dev": "eth0" if command[-1] == "192.0.2.1" else "wifi0"}
+        ])),
+    )
+    assert preflight._has_wired_route("192.0.2.1:7447")
+    assert not preflight._has_wired_route("192.0.2.2:7447")

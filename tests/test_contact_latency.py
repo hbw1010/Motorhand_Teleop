@@ -5,10 +5,10 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from wujihand2_force_glove.domain import GLOVE_JOINTS
-from wujihand2_force_glove.real_hand.force_feedback import _Jacobian
-from wujihand2_force_glove.real_hand.force_linear import MaxTorqueLinearConfig
-from wujihand2_force_glove.real_hand.runtime import create_retargeter
+from motorhand_teleop.domain import GLOVE_JOINTS
+from motorhand_teleop.real_hand.force_feedback import _Jacobian
+from motorhand_teleop.real_hand.force_linear import MaxTorqueLinearConfig
+from motorhand_teleop.real_hand.runtime import create_retargeter
 from test_contact_runtime import (
     ROOT, advance_steps, contact_config, create_contact_pair, human_joints, set_human,
 )
