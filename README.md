@@ -58,6 +58,8 @@ WujiHand2TaskModel -> HandTaskState -> GloveInverseSolver
 - `motor_hand.py`：Encos 原始电机与真实指节的机构转换、回零和 MIT 输出。
 - `control.py`：外部推理 q20 同时驱动两侧，以及手套接管的控制周期。
 - `runtime.py`：真实反馈双向跟随、单主导切换和命令入口。
+- `trajectory.py`：异步录制Wuji实测状态、校验JSONL文件并按时间插值。
+- `playback.py`：轨迹回放、手套实测姿态跟随及键盘切换接管。
 - `native/`：从 DexGlove 移入的 C ABI 安全核心与官方 C SDK 运输层。
 
 不再导入 DexGlove 的 `real_hand`、`HandPose` 或骨架生命周期。Python SDK 固定
@@ -125,6 +127,51 @@ Wuji2 控制默认采用 MIT `kp=5.0/kd=0.1`，在显式使能时写入；
 `pixi install` 会在安装本项目时编译；C++编译器由 Pixi 管理。
 它只替换相同几何的 Python 热点，正逆解、目标函数、约束和参数不变，
 不构建第二套映射算法；未编译时需重新安装，不静默回退慢路径。
+
+### 采集、回放和手套接管
+
+以下命令在项目根目录运行。采集使用现有手套遥操Wuji链路；文件不存在时自动创建，
+不会覆盖已有文件。至少记录两帧不同的Wuji反馈，用 `Ctrl+C` 正常结束并写入完整性校验。
+
+```bash
+# 实际使能Wuji；手套只读
+pixi run -q -e hardware wuji-teleop -- --record recordings/demo.jsonl
+
+# 只校验录制文件，不连接设备
+pixi run -q -e hardware wuji-replay -- recordings/demo.jsonl
+
+# 只回放Wuji实机，不驱动手套
+pixi run -q -e hardware wuji-replay -- recordings/demo.jsonl --execute
+
+# 低速回放Wuji并让手套跟随，再通过键盘切换手套力反馈接管
+pixi run -q -e hardware wuji-replay -- recordings/demo.jsonl --with-glove --speed 0.05 --execute
+```
+
+采集时也可以将 `--record recordings/demo.jsonl` 附加到 `wuji-force-contact`，
+同时保留该任务原有的力反馈。文件按Wuji原始接收时刻记录20轴**实测位置**、
+可用的实测速度和effort电流，以及单独的发送位置目标；回放使用实测位置，
+按记录时间插值，不把位置目标或电流当作实测接触力。
+
+双侧回放启动时先按既有规则伺服回零手套，然后Wuji从当前实测姿态平滑接入轨迹；
+手套通过共享任务空间逆解跟随Wuji**实时实测姿态**，不是跟随录制目标。按 `T`
+或空格切换为手套主导Wuji并使用现有接触阻抗力反馈；回放时间暂停。再次按键
+从暂停位置平滑恢复，`Q` 或 `Ctrl+C` 释放本会话输出，不在退出时回零。
+双侧模式需要交互式终端；手套同一会话内切换不重复回零。
+
+`--speed 0.05` 只让轨迹时间以原速度的5%推进，不把控制刷新频率降到5%；
+`--rate` 仍是目标50 Hz，不代表实际总线频率保证。双侧回放的逆解在不访问设备的
+独立进程计算，结果仍使用其Wuji实测帧的原始100 ms期限。没有可及时发送的新逆解时，
+轨迹和切换插值暂停，Wuji重复上一位置目标；手套不发送过期目标，恢复时从新鲜实测电机角
+重新平滑接入。超过2秒仍没有可用逆解则停止；这不是放宽反馈或命令期限。
+`等待新鲜手套逆解` 表示暂停而非正常推进。
+
+后台逆解仍使用原任务目标和软限位。若优化器已收敛但电机角仅有不超过
+`1e-7 rad` 的数值越界，会投影回原限位内并通过同一CAD闭链正解重建手套姿态；
+较大越界、优化器未收敛或闭链重建失败仍拒绝输出并报告具体原因。
+
+仅对完整、身份匹配且实测位置全在设备关节范围内的轨迹允许使能。当前力反馈的
+每轴10 Nm是软件名义限幅，不是经过实测确认的手套安全或实际输出力矩；双侧回放、
+接管及佩戴情况下的力反馈仍需现场验收。
 
 当前 Wuji C ABI 6 从同一 `joint_states` 包按NID重排位置、速度(rad/s)和实测
 effort电流(A)，保留真实收包与设备时戳。可选量缺失或非有限时返回 `None`，不填假零。

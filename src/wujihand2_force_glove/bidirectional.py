@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from threading import Lock
 from types import MappingProxyType
@@ -15,6 +15,9 @@ from .domain import GLOVE_JOINTS
 from .landmarks import Ve33LandmarkSource
 from .retargeting import GloveWujiRetargetPipeline, WujiHand2Retargeter
 from .ve33_kinematics import Ve33Pose
+
+# 数值纠偏上限；最终电机目标仍必须严格位于原始软件限位内。
+_MOTOR_BOUND_ROUNDOFF_RAD = 1e-7
 
 
 class ControlMode(str, Enum):
@@ -167,6 +170,15 @@ class HandoverController:
             duration_ns=max(1, int(round(duration_s * 1e9))),
         )
 
+    def defer(self, duration_ns: int) -> None:
+        """暂停手动切换过渡，等待期间不消耗插值时长。"""
+        if type(duration_ns) is not int or duration_ns < 0:
+            raise ValueError("过渡暂停时间必须是非负整数ns")
+        if self._handover is not None:
+            self._handover = replace(
+                self._handover, start_ns=self._handover.start_ns + duration_ns,
+            )
+
     def output(self, candidate: np.ndarray, *, now_ns: int) -> np.ndarray:
         value = np.asarray(candidate, dtype=np.float64)
         if value.ndim != 1 or not np.all(np.isfinite(value)):
@@ -274,6 +286,7 @@ class InverseRetargetResult:
     success: bool
     iterations: int
     tree_positions_rad: Mapping[str, float]
+    failure_reason: str | None = None
 
     def __post_init__(self) -> None:
         values = np.asarray(self.glove_positions_rad, dtype=np.float64)
@@ -509,13 +522,48 @@ class GloveInverseSolver:
         if last_state is None:
             raise ValueError("逆解最终候选不满足CAD闭环约束，保留原姿态") from last_error
         solved = last_state
-        errors_mm = np.linalg.norm(solved.points_m - target_points, axis=1) * 1000.0
         success = bool(fit.success)
-        if constrained:
-            success = success and bool(
-                np.all(last_motor_positions[motor_indices] >= self._motor_lower[motor_indices] - 1e-9)
-                and np.all(last_motor_positions[motor_indices] <= self._motor_upper[motor_indices] + 1e-9)
-            )
+        failure_reason = None if success else (
+            f"优化器未收敛：status={getattr(fit, 'status', 'unknown')}, "
+            f"message={getattr(fit, 'message', 'unknown')}, nfev={fit.nfev}"
+        )
+        if constrained and success:
+            bounded = np.clip(last_motor_positions, self._motor_lower, self._motor_upper)
+            excess = np.abs(last_motor_positions - bounded)
+            worst = int(np.argmax(excess))
+            if excess[worst] > _MOTOR_BOUND_ROUNDOFF_RAD:
+                success = False
+                failure_reason = f"模型电机{self._motor_names[worst]}超出软限位{excess[worst]:.9g} rad"
+            elif np.any(excess > 0):
+                try:
+                    # 仅修复数值级越界，随后以精确限位内的m12重算同一CAD闭链。
+                    landmarks = self.glove_model.landmarks
+                    projected = landmarks.model.kinematics.evaluate_motors(
+                        dict(zip(self._motor_names, bounded)), seed=seed,
+                    )
+                    frame = landmarks.evaluate_tree(projected.all_positions)
+                    actual_m = np.asarray([projected.motor_positions[name] for name in self._motor_names])
+                    actual_q = frame.glove_pose.vector()
+                    if (np.any(actual_m < self._motor_lower) or np.any(actual_m > self._motor_upper)
+                            or np.any(np.abs(actual_q) > self.joint_bound_rad)):
+                        raise ValueError("投影后的CAD姿态仍超出电机或指节边界")
+                    rotation = landmarks.model_to_canonical_row
+                    points = (frame.points_m - frame.points_m[0]) @ rotation
+                    point_jacobian = np.einsum(
+                        "paj,ab->pbj",
+                        frame.jacobian_points_glove - frame.jacobian_points_glove[0], rotation,
+                    )
+                    task_jacobian = (point_jacobian * self.task_weight).reshape(63, 12)
+                    last_jacobian = (
+                        task_jacobian if weight == 0.0
+                        else np.concatenate((task_jacobian, regularization_jacobian), axis=0)
+                    )
+                    solved = HandTaskState(points, timestamp_ns=eval_timestamp, source="glove")
+                    positions, seed = actual_q, projected
+                except (ValueError, FloatingPointError, np.linalg.LinAlgError) as error:
+                    success = False
+                    failure_reason = f"数值限位投影后的CAD闭链无效：{error}"
+        errors_mm = np.linalg.norm(solved.points_m - target_points, axis=1) * 1000.0
         if success:
             self._last_successful_positions = positions.copy()
             self._last_successful_seed = seed
@@ -530,6 +578,7 @@ class GloveInverseSolver:
             success=success,
             iterations=int(fit.nfev),
             tree_positions_rad=seed.all_positions if success else {},
+            failure_reason=failure_reason,
         )
 
 

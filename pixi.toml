@@ -35,6 +35,7 @@ demo = "python -m wujihand2_force_glove.cli demo"
 validate-assets = "python -m wujihand2_force_glove.cli validate-assets"
 test = "python -m pytest -q"
 test-glove-chain = "python -m pytest -o addopts='' tests/test_ve33_native.py tests/test_ve33_motor_roundtrip.py tests/test_ve33_adapter.py tests/test_encos_hardware.py tests/test_encos_controller.py tests/test_encos_zero_step.py tests/test_hardware_control_coordinates.py tests/test_hardware.py tests/test_bidirectional.py tests/test_bidirectional_models.py tests/test_landmarks.py tests/test_retargeting.py tests/test_feedback.py tests/test_force_feedback.py tests/test_contact_feedback.py tests/test_contact_runtime.py tests/test_force_linear.py tests/test_curve_telemetry.py tests/test_wuji_native.py tests/test_real_hand_runtime.py tests/test_inverse_realtime.py -q --tb=short"
+test-record-replay = "python -m pytest -o addopts='' tests/test_trajectory.py tests/test_playback.py tests/test_inverse_worker.py tests/test_inverse_realtime.py tests/test_hardware_control_coordinates.py tests/test_bidirectional.py tests/test_real_hand_runtime.py tests/test_contact_runtime.py -q --tb=short"
 strict-validation = "python -m wujihand2_force_glove.validation"
 mujoco-force-feedback = "python -m wujihand2_force_glove.mujoco_sim"
 mujoco-viewer = "python -m wujihand2_force_glove.mujoco_viewer"
@@ -58,6 +59,7 @@ plotjuggler-pinky = "bash scripts/ros_plotjuggler.sh plot --nosplash --buffer_si
 plotjuggler-bridge = "bash scripts/ros_plotjuggler.sh bridge"
 plotjuggler-demo = "bash scripts/ros_plotjuggler.sh demo"
 wuji-force-contact = "RUST_LOG=warn python -m wujihand2_force_glove.real_hand follow --mode glove-to-hand2 --wuji-serial WH2KA01260814006 --hand right --glove-hand right --approved-firmware 2.2.3 --rate 50 --feedback-linear-config config/feedback/max-torque-linear-right.json --contact-feedback-config config/feedback/contact-impedance-right.json --execute --torque-only"
+wuji-replay = "RUST_LOG=warn python -m wujihand2_force_glove.real_hand.playback --wuji-serial WH2KA01260814006 --approved-firmware 2.2.3 --hand right --glove-hand right --rate 50"
 wuji-discover = "python -m wujihand2_force_glove.real_hand discover"
 
 [feature.hardware.pypi-dependencies]

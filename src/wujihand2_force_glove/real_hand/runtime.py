@@ -274,7 +274,7 @@ class PairRuntime:
                 timestamp_ns=hand.received_ns,
             )
             if not inverse.success:
-                raise ValueError("MotorHand 只读预热逆解未收敛")
+                raise ValueError(f"MotorHand 只读预热逆解未收敛：{getattr(inverse, 'failure_reason', None)}")
             actual = self.glove_driver.position_from_tree(
                 inverse.tree_positions_rad, timestamp_ns=glove.pose.timestamp_ns,
             )
@@ -401,7 +401,7 @@ class PairRuntime:
                     timestamp_ns=hand.received_ns,
                 )
                 if not inverse.success:
-                    raise ValueError("MotorHand 任务空间逆解未收敛")
+                    raise ValueError(f"MotorHand 任务空间逆解未收敛：{getattr(inverse, 'failure_reason', None)}")
                 candidate = np.asarray(inverse.glove_positions_rad, dtype=np.float64)
                 if candidate.shape != (12,) or not np.all(np.isfinite(candidate)):
                     raise ValueError("MotorHand 逆解必须为有限12真实指节rad")
@@ -539,6 +539,7 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--rate", type=float, default=None, help="循环目标频率Hz：手套→Wuji默认50，Wuji→手套默认20")
             command.add_argument("--duration", type=float, default=0.0, help="秒；0表示运行到Ctrl-C")
             command.add_argument("--transition", type=float, default=0.5, help="五次平滑过渡秒数")
+            command.add_argument("--record", type=Path, help="异步录制Wuji真实状态到新JSONL文件（不会覆盖）")
             command.add_argument("--curves-port", type=int, default=None,
                                  help="旁路发送曲线到本机UDP端口；不启动UI，不改变控制目标")
             command.add_argument("--torque-only", action="store_true",
@@ -583,6 +584,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--duration 必须为非负有限数")
         if not np.isfinite(args.transition) or args.transition <= 0:
             parser.error("--transition 必须为正有限数")
+        if args.record is not None and args.mode != FollowMode.GLOVE_TO_HAND2.value:
+            parser.error("--record 仅用于 glove-to-hand2")
         if args.curves_port is not None and not 1 <= args.curves_port <= 65535:
             parser.error("--curves-port 必须为1至65535的整数")
         if ((args.feedback_calibration is not None or args.feedback_linear_config is not None)
@@ -625,6 +628,9 @@ def main(argv: list[str] | None = None) -> int:
     driver = None
     runtime = None
     curve_publisher = None
+    recorder = None
+    recording_complete = False
+    recorded_frame = False
     try:
         if args.command == "inspect":
             from .preflight import discover_devices
@@ -695,6 +701,13 @@ def main(argv: list[str] | None = None) -> int:
             transition_s=args.transition, force_feedback=feedback,
         )
         runtime.connect(serial_number=args.wuji_serial)
+        if args.record is not None:
+            from .trajectory import TrajectoryRecorder
+            identity = runtime.identities["wuji_hand2"]
+            recorder = TrajectoryRecorder(
+                args.record, hand=identity["hand"], serial_number=identity["serial_number"],
+                firmware_version=identity["firmware_version"],
+            )
         inspection = runtime.inspect()
         if args.torque_only:
             if args.execute:
@@ -740,6 +753,9 @@ def main(argv: list[str] | None = None) -> int:
         while args.duration == 0 or time.monotonic() - began < args.duration:
             cycle = time.monotonic()
             tick = runtime.step()
+            if recorder is not None:
+                recorder.record(tick.hand2_state, tick.output_positions_rad)
+                recorded_frame = True
             if curve_publisher is not None:
                 curve_publisher.publish(tick)
             if cycle >= next_report:
@@ -771,8 +787,10 @@ def main(argv: list[str] | None = None) -> int:
                     }, ensure_ascii=False))
                 next_report = cycle + 1.0
             time.sleep(max(0.0, 1.0 / args.rate - (time.monotonic() - cycle)))
+        recording_complete = True
         return 0
     except KeyboardInterrupt:
+        recording_complete = recorded_frame
         print("已中断：释放本会话输出；只读输入端不失能。")
         return 130
     finally:
@@ -786,5 +804,12 @@ def main(argv: list[str] | None = None) -> int:
                 finally:
                     glove.close()
         finally:
-            if curve_publisher is not None:
-                curve_publisher.close()
+            try:
+                if curve_publisher is not None:
+                    curve_publisher.close()
+            finally:
+                if recorder is not None:
+                    if recording_complete and sys.exc_info()[0] is None:
+                        recorder.close()
+                    else:
+                        recorder.abort()

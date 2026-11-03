@@ -16,6 +16,7 @@ from ..bidirectional import (
 )
 from ..domain import GLOVE_JOINTS, GlovePose, WujiState, WujiTarget
 from .force_feedback import ForceFeedbackCommand, ForceFeedbackController
+from .inverse_worker import InverseWorkerResult
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class ControlTick:
     shadow_glove_positions_rad: np.ndarray | None
     timestamp_ns: int
     force_feedback: ForceFeedbackCommand | None = None
+    inverse_fresh: bool = True
 
     def __post_init__(self) -> None:
         for name in ("candidate_positions_rad", "sent_positions_rad"):
@@ -48,8 +50,10 @@ class ControlTick:
 class RealWujiControlLoop:
     """把真实 Wuji 状态、双向求解和位置命令接成一个周期。
 
-    推理主导时手套跟随最终平滑后的 Hand2 目标；接管期间手套位置始终
-    由人手主导，反解只作影子诊断。底层看门狗、固件审批和急停由适配器负责。
+    默认推理时手套跟随最终平滑后的 Hand2 目标；glove_follow_actual=True
+    改为跟随本周期实测姿态。startup_transition_s 显式启用首帧实测锚定；
+    无手套回放可用 compute_shadow_glove=False 跳过影子逆解。接管期间
+    手套位置由人手主导。底层看门狗、固件审批和急停由适配器负责。
     """
 
     def __init__(
@@ -61,9 +65,22 @@ class RealWujiControlLoop:
         initial_mode: ControlMode = ControlMode.INFERENCE,
         command_timeout_ns: int = 100_000_000,
         force_feedback: ForceFeedbackController | None = None,
+        glove_follow_actual: bool = False,
+        startup_transition_s: float | None = None,
+        compute_shadow_glove: bool = True,
+        inverse_worker=None,
     ) -> None:
         if command_timeout_ns <= 0:
             raise ValueError("command_timeout_ns必须为正整数")
+        if (startup_transition_s is not None
+                and (not np.isfinite(startup_transition_s) or startup_transition_s < 0)):
+            raise ValueError("回放启动过渡时间非法")
+        if (glove_follow_actual or startup_transition_s is not None) and initial_mode is not ControlMode.INFERENCE:
+            raise ValueError("回放必须从INFERENCE模式启动")
+        if not compute_shadow_glove and glove_driver is not None:
+            raise ValueError("有手套驱动时不能关闭手套逆解")
+        if inverse_worker is not None and (glove_driver is None or not glove_follow_actual):
+            raise ValueError("异步逆解仅用于手套跟随实测Hand2的回放")
         self.driver = driver
         self.glove_driver = glove_driver
         self.retargeter = retargeter
@@ -71,6 +88,19 @@ class RealWujiControlLoop:
             raise ValueError("真实力反馈接管需要MotorHand驱动")
         self.force_feedback = force_feedback
         self._force_output_active = False
+        self.glove_follow_actual = bool(glove_follow_actual)
+        self.startup_transition_s = None if startup_transition_s is None else float(startup_transition_s)
+        self.compute_shadow_glove = bool(compute_shadow_glove)
+        self.inverse_worker = inverse_worker
+        self._inverse_result: InverseWorkerResult | None = None
+        self._inverse_last_id = 0
+        self._inverse_consumed_id = 0
+        self._inverse_last_stamp = -1
+        self._inverse_wait_started_ns: int | None = None
+        self._inverse_last_cycle_ns: int | None = None
+        self._inverse_needs_reanchor = False
+        self._playback_start_pending = self.startup_transition_s is not None
+        self._startup_blending = False
         self._enabled = False
         if self.glove_driver is not None:
             limits = getattr(self.glove_driver, "model_motor_limits_rad", None)
@@ -84,9 +114,58 @@ class RealWujiControlLoop:
         self._last_command = np.zeros(20, dtype=np.float64)
         self._has_command = False
 
+    def _queue_inverse(self, state: WujiState, *, force: bool = False) -> None:
+        if self.inverse_worker is None:
+            return
+        if not force and state.received_ns <= self._inverse_last_stamp:
+            return
+        try:
+            request_id = self.inverse_worker.submit(state.positions_rad, state.received_ns)
+        except BlockingIOError:
+            return
+        self._inverse_last_id = request_id
+        self._inverse_last_stamp = state.received_ns
+
+    def _resolve_inverse(self, state: WujiState, *, now: int):
+        """非阻塞使用最近的真实帧逆解，保留该帧的原始期限。"""
+        result = self.inverse_worker.latest()
+        fresh = False
+        if result is not None:
+            if not result.success:
+                raise ValueError(f"后台手套逆解失败：{result.error}")
+            if result.received_ns > state.received_ns or result.received_ns > now:
+                raise ValueError("后台手套逆解来源时戳异常")
+            if (result.request_id > self._inverse_consumed_id
+                    and now - result.received_ns < self.command_timeout_ns):
+                self._inverse_result = result
+                self._inverse_consumed_id = result.request_id
+                fresh = True
+        self._queue_inverse(state)
+        cached = self._inverse_result
+        # 12轴命令需要逐轴提交；不在源期限只剩几毫秒时开始发送。
+        margin_ns = min(30_000_000, self.command_timeout_ns // 2)
+        usable = cached is not None and now - cached.received_ns < self.command_timeout_ns - margin_ns
+        if not usable:
+            self._inverse_needs_reanchor = True
+            if self._inverse_wait_started_ns is None:
+                self._inverse_wait_started_ns = now
+            elif now - self._inverse_wait_started_ns >= 2_000_000_000:
+                raise TimeoutError("等待新鲜手套逆解超过2秒，已停止回放")
+            return None, False
+        self._inverse_wait_started_ns = None
+        return cached, fresh
+
+    def _reset_inverse(self) -> None:
+        self._inverse_result = None
+        self._inverse_consumed_id = self._inverse_last_id
+        self._inverse_last_stamp = -1
+        self._inverse_wait_started_ns = None
+        self._inverse_last_cycle_ns = None
+        self._inverse_needs_reanchor = False
+
     @property
     def mode(self) -> ControlMode:
-        return self.handover.mode
+        return ControlMode.INFERENCE if self._startup_blending else self.handover.mode
 
     def connect(self, *, serial_number: str | None = None):
         if serial_number is None:
@@ -117,14 +196,38 @@ class RealWujiControlLoop:
         self.driver.validate_enable()
         try:
             if self.glove_driver is not None:
-                if (self.handover.target_mode is ControlMode.GLOVE_TAKEOVER
-                        and self.force_feedback is not None):
-                    self._prepare_force_takeover(now_ns=now_ns)
-                else:
-                    self.glove_driver.home()
-                    self.glove_driver.prepare()
-                    if self.handover.target_mode is ControlMode.GLOVE_TAKEOVER:
+                if self.force_feedback is not None:
+                    hand = self.driver.read_state()
+                    glove = self.glove_driver.read_state()
+                    now = time.monotonic_ns() if now_ns is None else int(now_ns)
+                    self.force_feedback.validate_inputs(hand, glove, now_ns=now)
+                self.glove_driver.home()
+                self.glove_driver.prepare()
+                if self.force_feedback is not None:
+                    hand = self.driver.read_state()
+                    glove = self.glove_driver.read_state()
+                    now = time.monotonic_ns() if now_ns is None else int(now_ns)
+                    self.force_feedback.prepare(hand, glove, now_ns=now)
+                if self.handover.target_mode is ControlMode.GLOVE_TAKEOVER:
+                    if self.force_feedback is not None:
+                        self._prepare_force_takeover(now_ns=now_ns)
+                    else:
                         self.glove_driver.disable()
+            if self.glove_follow_actual and self.glove_driver is not None:
+                # 首次逆解初始化不得占用Wuji看门狗租约；正式周期仍重新读状态、
+                # 求解并检查原始反馈期限，不能把这里的结果或时戳当作新反馈。
+                hand = self.driver.read_state()
+                if hand.online_count != 20:
+                    raise RuntimeError("Hand2反馈并非20轴全在线")
+                if now_ns is None:
+                    observed_ns = time.monotonic_ns()
+                    if not 0 <= observed_ns - hand.received_ns < self.command_timeout_ns:
+                        raise TimeoutError("Hand2反馈已过期或时钟域错误")
+                inverse, _ = self.retargeter.hand2_to_glove(
+                    hand.positions_rad, initial=None, timestamp_ns=hand.received_ns,
+                )
+                if not inverse.success:
+                    raise ValueError(f"实测Hand2姿态的手套逆解预热未收敛：{getattr(inverse, 'failure_reason', None)}")
             # 回零可能耗时数十秒；完成后才取得Wuji输出，避免看门狗先超时。
             self.driver.enable()
             self._enabled = True
@@ -168,6 +271,22 @@ class RealWujiControlLoop:
             return
         if self.force_feedback is not None and not self._enabled:
             raise RuntimeError("力反馈接管必须先显式enable")
+        if self.inverse_worker is not None and self._enabled and self._has_command:
+            # 切换手套模式可能阻塞；先用新鲜Hand2状态刷新同一保持目标。
+            state = self.driver.read_state()
+            observed_ns = time.monotonic_ns() if now_ns is None else int(now_ns)
+            if state.online_count != 20 or not 0 <= observed_ns - state.received_ns < self.command_timeout_ns:
+                raise TimeoutError("切换前Hand2反馈不完整或已过期")
+            hold = WujiTarget(self._last_command.copy(), np.zeros(20), np.zeros(20))
+            self.driver.validate(hold)
+            self.driver.send_target(
+                hold, deadline_ns=min(observed_ns, state.received_ns) + self.command_timeout_ns,
+            )
+            self._reset_inverse()
+            if mode is ControlMode.INFERENCE:
+                self._queue_inverse(state, force=True)
+        self._playback_start_pending = False
+        self._startup_blending = False
         if self._has_command:
             anchor = self._last_command
         else:
@@ -193,21 +312,10 @@ class RealWujiControlLoop:
             self._start_glove_follow(glove_motors, now_ns=ready_ns, duration_s=duration_s)
 
     def _prepare_force_takeover(self, *, now_ns: int | None) -> None:
-        hand = self.driver.read_state()
-        glove = self.glove_driver.read_state()
-        now = time.monotonic_ns() if now_ns is None else int(now_ns)
-        # 先拒绝缺实测effort/标定，再取得手套输出；初次home之后重新预热。
-        self.force_feedback.prepare(
-            hand, glove, now_ns=now,
-        )
+        # 几何已在Wuji使能前预热。切换只取得零力输出权并重置历史；
+        # 若几何已过期，compute会撤力并异步刷新，不在实时链路上等待。
         self._force_output_active = True
         self.glove_driver.enable_force_feedback()
-        hand = self.driver.read_state()
-        glove = self.glove_driver.read_state()
-        now = time.monotonic_ns() if now_ns is None else int(now_ns)
-        self.force_feedback.prepare(
-            hand, glove, now_ns=now,
-        )
         now = time.monotonic_ns() if now_ns is None else int(now_ns)
         self.force_feedback.reset(now_ns=now)
 
@@ -234,7 +342,9 @@ class RealWujiControlLoop:
                 inference_positions_rad=inference_positions_rad, now_ns=now_ns,
             )
         except BaseException:
-            if self._force_output_active:
+            if (self._force_output_active or (
+                self._enabled and (self.glove_follow_actual or self.startup_transition_s is not None)
+            )):
                 self.emergency_stop()
             raise
 
@@ -260,6 +370,14 @@ class RealWujiControlLoop:
             deadline_ns = min(deadline_ns, hand2_state.received_ns + self.command_timeout_ns)
             if not 0 <= observed_ns - hand2_state.received_ns < self.command_timeout_ns:
                 raise TimeoutError("Hand2反馈已过期或时钟域错误")
+        if self._playback_start_pending:
+            self.handover = HandoverController(ControlMode.GLOVE_TAKEOVER)
+            self.handover.request(
+                ControlMode.INFERENCE, hand2_state.positions_rad,
+                now_ns=now, duration_s=self.startup_transition_s,
+            )
+            self._playback_start_pending = False
+            self._startup_blending = self.handover.in_handover
         self.state_bus.publish_hand2(
             _device_state(hand2_state),
             self.retargeter.hand2_model.state(
@@ -301,29 +419,88 @@ class RealWujiControlLoop:
                 raise RuntimeError("INFERENCE模式缺少推理Hand2目标")
             candidate = _positions(inference_positions_rad)
 
-        sent = self.handover.output(candidate, now_ns=now)
+        inverse = None
+        inverse_fresh = True
+        glove_deadline_ns = deadline_ns
+        async_follow = (
+            self.inverse_worker is not None
+            and self.handover.target_mode is ControlMode.INFERENCE
+        )
+        if async_follow:
+            if not self._has_command:
+                # 首帧在本周期同步预检，不能拿使能前的预热结果冒充新反馈。
+                inverse, _ = self.retargeter.hand2_to_glove(
+                    hand2_state.positions_rad, initial=None, timestamp_ns=hand2_state.received_ns,
+                )
+                if not inverse.success:
+                    raise ValueError(f"最终Hand2目标的手套逆解未收敛：{getattr(inverse, 'failure_reason', None)}")
+                self._inverse_result = InverseWorkerResult(
+                    0, hand2_state.received_ns, inverse.glove_positions_rad,
+                    dict(inverse.tree_positions_rad), True,
+                )
+                self._queue_inverse(hand2_state)
+            else:
+                check_now = time.monotonic_ns() if now_ns is None else now
+                inverse, inverse_fresh = self._resolve_inverse(hand2_state, now=check_now)
+            if inverse_fresh and self._inverse_needs_reanchor:
+                # 等待期间手套可能已被人手移动；重新采样电机位置再平滑接入。
+                glove_state = self.glove_driver.read_state()
+                reanchor_ns = time.monotonic_ns() if now_ns is None else now
+                stamps = (glove_state.received_ns, glove_state.pose.timestamp_ns)
+                if (tuple(sorted(glove_state.online_ids)) != tuple(range(1, 13))
+                        or any(stamp is None or not 0 <= reanchor_ns - stamp < self.command_timeout_ns
+                               for stamp in stamps)):
+                    raise TimeoutError("恢复手套跟随时反馈不完整或已过期")
+                glove_deadline_ns = min(
+                    glove_deadline_ns, *(stamp + self.command_timeout_ns for stamp in stamps),
+                )
+                self._start_glove_follow(
+                    glove_state.motor_positions_rad, now_ns=reanchor_ns, duration_s=0.5,
+                )
+                self._inverse_needs_reanchor = False
+            if not inverse_fresh and self._inverse_last_cycle_ns is not None:
+                self.handover.defer(max(0, now - self._inverse_last_cycle_ns))
+            self._inverse_last_cycle_ns = now
+
+        # 尚未拿到新逆解时，保持上一条已发送的Wuji目标，不推进轨迹或切换过渡。
+        if async_follow and not inverse_fresh and self._has_command:
+            sent = self._last_command.copy()
+        else:
+            sent = self.handover.output(candidate, now_ns=now)
+            if self._startup_blending and not self.handover.in_handover:
+                self._startup_blending = False
         glove_target = None
-        if self.handover.target_mode is ControlMode.INFERENCE:
-            # 必须反解最终发送目标，而不是尚未经过无扰切换的 candidate。
-            inverse, _ = self.retargeter.hand2_to_glove(
-                sent, initial=None, timestamp_ns=now
-            )
-            if not inverse.success:
-                raise ValueError("最终Hand2目标的手套逆解未收敛")
-            shadow_glove = inverse.glove_positions_rad
-            if self.glove_driver is not None:
-                # 成功逆解已提供同次完整CAD树；禁止把q12再做一次昂贵的闭链逆解。
-                goal_pose = self.glove_driver.position_from_tree(
-                    inverse.tree_positions_rad, timestamp_ns=now,
+        if (self.handover.target_mode is ControlMode.INFERENCE
+                and self.compute_shadow_glove):
+            if not async_follow:
+                # 普通推理跟随最终目标；回放跟随本周期实测姿态。
+                inverse_source = hand2_state.positions_rad if self.glove_follow_actual else sent
+                inverse, _ = self.retargeter.hand2_to_glove(
+                    inverse_source, initial=None, timestamp_ns=now
                 )
-                goal_tree = self.glove_driver.position_tree(goal_pose)
-                names = self.glove_driver.motor_names
-                goal_motors = np.asarray([goal_tree[name] for name in names])
-                motors = self._glove_handover.output(goal_motors, now_ns=now)
-                glove_target = self.glove_driver.position_from_motors(
-                    dict(zip(names, motors)), timestamp_ns=now,
-                )
-                shadow_glove = glove_target.vector()
+                if not inverse.success:
+                    raise ValueError(f"最终Hand2目标的手套逆解未收敛：{getattr(inverse, 'failure_reason', None)}")
+            if inverse is not None:
+                shadow_glove = inverse.glove_positions_rad
+                if self.glove_driver is not None:
+                    # 后台结果仍使用它的真实来源期限，绝不能用新Hand2帧续期。
+                    source_ns = (
+                        self._inverse_result.received_ns if async_follow
+                        else now
+                    )
+                    if async_follow:
+                        glove_deadline_ns = min(glove_deadline_ns, source_ns + self.command_timeout_ns)
+                    goal_pose = self.glove_driver.position_from_tree(
+                        inverse.tree_positions_rad, timestamp_ns=source_ns,
+                    )
+                    goal_tree = self.glove_driver.position_tree(goal_pose)
+                    names = self.glove_driver.motor_names
+                    goal_motors = np.asarray([goal_tree[name] for name in names])
+                    motors = self._glove_handover.output(goal_motors, now_ns=now)
+                    glove_target = self.glove_driver.position_from_motors(
+                        dict(zip(names, motors)), timestamp_ns=source_ns,
+                    )
+                    shadow_glove = glove_target.vector()
         target = WujiTarget(
             positions_rad=sent,
             velocities_rad_s=np.zeros(20),
@@ -347,8 +524,9 @@ class RealWujiControlLoop:
                 raise RuntimeError("手套力控未使能")
         elif self.glove_driver is not None and glove_target is not None:
             self.glove_driver.validate_command(target_pose=glove_target)
-        # 所有本层准备/验证均在任一侧发送前完成。显式 now_ns 不与真实时钟混用。
-        if (time.monotonic_ns() if now_ns is None else now) >= deadline_ns:
+        # 两侧在发送前分别检查各自真实来源期限。
+        check_ns = time.monotonic_ns() if now_ns is None else now
+        if check_ns >= deadline_ns or (glove_target is not None and check_ns >= glove_deadline_ns):
             raise TimeoutError("控制周期计算完成时命令已过期")
         self.driver.send_target(target, deadline_ns=deadline_ns)
         # 锚点记录实际已发往 Hand2 的命令，即使另一设备随后发送失败也不回退。
@@ -369,7 +547,7 @@ class RealWujiControlLoop:
                     self.force_feedback.acknowledge(actual)
                     feedback = replace(feedback, model_current_a=actual)
             elif glove_target is not None:
-                self.glove_driver.send_position(glove_target, deadline_ns=deadline_ns)
+                self.glove_driver.send_position(glove_target, deadline_ns=glove_deadline_ns)
         return ControlTick(
             mode=self.mode,
             hand2_state=hand2_state,
@@ -378,10 +556,18 @@ class RealWujiControlLoop:
             shadow_glove_positions_rad=shadow_glove,
             timestamp_ns=now,
             force_feedback=feedback,
+            inverse_fresh=inverse_fresh,
         )
 
     def disable(self):
         self._force_output_active = False
+        self._has_command = False
+        self._playback_start_pending = (
+            self.startup_transition_s is not None
+            and self.handover.target_mode is ControlMode.INFERENCE
+        )
+        self._startup_blending = False
+        self._reset_inverse()
         self._enabled = False
         try:
             return self.driver.disable()
@@ -391,6 +577,13 @@ class RealWujiControlLoop:
 
     def emergency_stop(self):
         self._force_output_active = False
+        self._has_command = False
+        self._playback_start_pending = (
+            self.startup_transition_s is not None
+            and self.handover.target_mode is ControlMode.INFERENCE
+        )
+        self._startup_blending = False
+        self._reset_inverse()
         self._enabled = False
         try:
             return self.driver.emergency_stop()
@@ -408,8 +601,12 @@ class RealWujiControlLoop:
                     self.glove_driver.close()
             finally:
                 self._force_output_active = False
-                if self.force_feedback is not None:
-                    self.force_feedback.close()
+                try:
+                    if self.force_feedback is not None:
+                        self.force_feedback.close()
+                finally:
+                    if self.inverse_worker is not None:
+                        self.inverse_worker.close()
 
 
 def _positions(value: np.ndarray) -> np.ndarray:

@@ -92,6 +92,8 @@ class GloveBoundary:
         return SimpleNamespace(
             pose=self.pose,
             motor_positions_rad=dict(self._feedback.motor_positions),
+            received_ns=self.pose.timestamp_ns,
+            online_ids=tuple(range(1, 13)),
         )
 
     def read_pose(self):
@@ -412,3 +414,330 @@ def test_model_motor_transition_never_reinverts_glove_joint_targets(bridge, monk
     # 确认本回归实际经过不等于指节角的电机坐标，而不是q/m身份映射。
     assert not np.allclose(glove.motor_vector(pose), pose.vector())
     assert len(hand.commands) == 4
+
+
+def test_playback_follows_measured_hand_and_blends_from_actual(bridge, monkeypatch):
+    actual = bridge.glove_to_hand2(_joints(0.05))[0].positions_rad
+    target = bridge.glove_to_hand2(_joints(0.3))[0].positions_rad
+    hand = HandBoundary(actual)
+    glove = GloveBoundary(_joints(0.0))
+    loop = RealWujiControlLoop(
+        hand, bridge, glove_driver=glove, glove_follow_actual=True,
+        startup_transition_s=1e-6,
+    )
+    sources = []
+    inverse = bridge.hand2_to_glove
+
+    def capture(q, **kwargs):
+        sources.append(q.copy())
+        return inverse(q, **kwargs)
+
+    monkeypatch.setattr(bridge, "hand2_to_glove", capture)
+    first = loop.step(inference_positions_rad=target, now_ns=100)
+    second = loop.step(inference_positions_rad=target, now_ns=1100)
+    np.testing.assert_allclose(first.sent_positions_rad, actual)
+    np.testing.assert_allclose(second.sent_positions_rad, target)
+    np.testing.assert_allclose(sources[0], actual)
+    np.testing.assert_allclose(sources[1], actual)
+    assert not np.allclose(second.sent_positions_rad, sources[1])
+
+
+def test_async_playback_holds_while_waiting_and_keeps_glove_source_deadline(bridge):
+    """等待新逆解时暂停推进；旧手套目标不能获得新反馈的期限。"""
+    first_hand = bridge.glove_to_hand2(_joints(0.05))[0].positions_rad
+    next_hand = bridge.glove_to_hand2(_joints(0.12))[0].positions_rad
+    recorded = bridge.glove_to_hand2(_joints(0.3))[0].positions_rad
+    hand = HandBoundary(first_hand)
+    glove = GloveBoundary(_joints(0.0))
+    hand.state = WujiState(first_hand, None, None, 1_000_000_000, 20)
+
+    class Worker:
+        def __init__(self):
+            self.pending = []
+            self.result = None
+
+        def submit(self, positions_rad, received_ns):
+            self.pending.append((positions_rad.copy(), received_ns))
+            return len(self.pending)
+
+        def latest(self):
+            return self.result
+
+    worker = Worker()
+    loop = RealWujiControlLoop(
+        hand, bridge, glove_driver=glove, glove_follow_actual=True,
+        startup_transition_s=1e-6, inverse_worker=worker,
+    )
+    first = loop.step(inference_positions_rad=recorded, now_ns=1_000_000_000)
+    hand.state = WujiState(next_hand, None, None, 1_020_000_000, 20)
+    waiting = loop.step(inference_positions_rad=recorded, now_ns=1_020_000_000)
+    np.testing.assert_array_equal(waiting.sent_positions_rad, first.sent_positions_rad)
+    assert not waiting.inverse_fresh
+    # 手套的旧目标源于旧实测帧；不能借用当前Hand2帧的更新时刻续期。
+    assert glove.positions[-1][1] <= 1_100_000_000
+
+    inverse, _ = bridge.hand2_to_glove(next_hand, initial=None, timestamp_ns=1_020_000_000)
+    assert inverse.success
+    worker.result = SimpleNamespace(
+        request_id=len(worker.pending), received_ns=1_020_000_000,
+        glove_positions_rad=inverse.glove_positions_rad,
+        tree_positions_rad=inverse.tree_positions_rad, success=True, error=None,
+    )
+    hand.state = WujiState(next_hand, None, None, 1_040_000_000, 20)
+    resumed = loop.step(inference_positions_rad=recorded, now_ns=1_040_000_000)
+    assert resumed.inverse_fresh
+    np.testing.assert_allclose(resumed.sent_positions_rad, recorded)
+
+
+def test_async_wait_does_not_skip_startup_handover(bridge):
+    actual = bridge.glove_to_hand2(_joints(0.05))[0].positions_rad
+    target = bridge.glove_to_hand2(_joints(0.4))[0].positions_rad
+    hand, glove = HandBoundary(actual), GloveBoundary(_joints(0.0))
+    hand.state = WujiState(actual, None, None, 1_000_000_000, 20)
+
+    class Worker:
+        def __init__(self):
+            self.sequence = 0
+            self.result = None
+
+        def submit(self, _positions, _stamp):
+            self.sequence += 1
+            return self.sequence
+
+        def latest(self):
+            return self.result
+
+    worker = Worker()
+    loop = RealWujiControlLoop(
+        hand, bridge, glove_driver=glove, glove_follow_actual=True,
+        startup_transition_s=1.0, inverse_worker=worker,
+    )
+    first = loop.step(inference_positions_rad=target, now_ns=1_000_000_000)
+    for index in range(1, 25):
+        stamp = 1_000_000_000 + index * 20_000_000
+        hand.state = WujiState(actual, None, None, stamp, 20)
+        tick = loop.step(inference_positions_rad=target, now_ns=stamp)
+        np.testing.assert_array_equal(tick.sent_positions_rad, first.sent_positions_rad)
+    inverse, _ = bridge.hand2_to_glove(actual, timestamp_ns=1_480_000_000)
+    worker.result = SimpleNamespace(
+        request_id=worker.sequence, received_ns=1_480_000_000,
+        glove_positions_rad=inverse.glove_positions_rad,
+        tree_positions_rad=inverse.tree_positions_rad, success=True, error=None,
+    )
+    # 等待期间人手可能移动：恢复时应从当下真实电机位置重新平滑接入。
+    glove._feedback = glove.model.evaluate_raw(_joints(0.1))
+    glove.pose = glove.model.to_glove_pose(glove._feedback, timestamp_ns=1_500_000_000)
+    hand.state = WujiState(actual, None, None, 1_500_000_000, 20)
+    resumed = loop.step(inference_positions_rad=target, now_ns=1_500_000_000)
+    assert np.max(np.abs(resumed.sent_positions_rad - first.sent_positions_rad)) < 1e-3
+    np.testing.assert_allclose(resumed.shadow_glove_positions_rad, glove.pose.vector(), atol=1e-7)
+
+
+def test_async_playback_stops_advancing_if_inverse_remains_late(bridge):
+    actual = bridge.glove_to_hand2(_joints(0.05))[0].positions_rad
+    target = bridge.glove_to_hand2(_joints(0.3))[0].positions_rad
+    hand = HandBoundary(actual)
+    glove = GloveBoundary(_joints(0.0))
+    hand.state = WujiState(actual, None, None, 1_000_000_000, 20)
+
+    class LateWorker:
+        def submit(self, _positions, _received_ns):
+            return 1
+
+        def latest(self):
+            return None
+
+    loop = RealWujiControlLoop(
+        hand, bridge, glove_driver=glove, glove_follow_actual=True,
+        startup_transition_s=1e-6, inverse_worker=LateWorker(),
+    )
+    first = loop.step(inference_positions_rad=target, now_ns=1_000_000_000)
+    hand.state = WujiState(actual, None, None, 1_080_000_000, 20)
+    waiting = loop.step(inference_positions_rad=target, now_ns=1_080_000_000)
+    np.testing.assert_array_equal(waiting.sent_positions_rad, first.sent_positions_rad)
+    assert not waiting.inverse_fresh and len(glove.positions) == 1
+    hand.state = WujiState(actual, None, None, 1_180_000_000, 20)
+    still_waiting = loop.step(inference_positions_rad=target, now_ns=1_180_000_000)
+    np.testing.assert_array_equal(still_waiting.sent_positions_rad, first.sent_positions_rad)
+    assert len(glove.positions) == 1
+    hand.state = WujiState(actual, None, None, 3_080_000_000, 20)
+    with pytest.raises(TimeoutError, match="等待新鲜手套逆解"):
+        loop.step(inference_positions_rad=target, now_ns=3_080_000_000)
+    assert len(hand.commands) == 3 and len(glove.positions) == 1
+
+
+def test_async_playback_rejects_failed_inverse_before_both_outputs(bridge):
+    actual = bridge.glove_to_hand2(_joints(0.05))[0].positions_rad
+    hand, glove = HandBoundary(actual), GloveBoundary(_joints(0.0))
+    hand.state = WujiState(actual, None, None, 1_000_000_000, 20)
+    stopped = []
+    hand.emergency_stop = lambda: stopped.append("hand")
+    glove.emergency_stop = lambda: stopped.append("glove")
+
+    class FailingWorker:
+        def submit(self, _positions, _received_ns):
+            return 1
+
+        def latest(self):
+            return SimpleNamespace(success=False, error="数值求解失败")
+
+    loop = RealWujiControlLoop(
+        hand, bridge, glove_driver=glove, glove_follow_actual=True,
+        inverse_worker=FailingWorker(),
+    )
+    loop.enable(now_ns=1_000_000_000)
+    loop.step(inference_positions_rad=actual, now_ns=1_000_000_000)
+    hand.state = WujiState(actual, None, None, 1_020_000_000, 20)
+    with pytest.raises(ValueError, match="数值求解失败"):
+        loop.step(inference_positions_rad=actual, now_ns=1_020_000_000)
+    assert len(hand.commands) == len(glove.positions) == 1
+    assert stopped == ["hand", "glove"]
+
+
+def test_standalone_playback_skips_inverse_and_anchors_start(bridge, monkeypatch):
+    actual = np.full(20, 0.1)
+    target = np.full(20, 0.4)
+    hand = HandBoundary(actual)
+    loop = RealWujiControlLoop(
+        hand, bridge, compute_shadow_glove=False, startup_transition_s=1e-6,
+    )
+
+    def reject(*args, **kwargs):
+        raise AssertionError("standalone playback must not solve glove inverse")
+
+    monkeypatch.setattr(bridge, "hand2_to_glove", reject)
+    first = loop.step(inference_positions_rad=target, now_ns=100)
+    last = loop.step(inference_positions_rad=target, now_ns=1100)
+    np.testing.assert_allclose(first.sent_positions_rad, actual)
+    np.testing.assert_allclose(last.sent_positions_rad, target)
+    assert first.shadow_glove_positions_rad is None
+
+
+def test_playback_force_switch_uses_prewarmed_geometry_and_releases_on_failure(
+    bridge, monkeypatch,
+):
+    from wujihand2_force_glove.real_hand.force_feedback import ForceFeedbackCommand
+
+    actual = bridge.glove_to_hand2(_joints(0.05))[0].positions_rad
+    target = bridge.glove_to_hand2(_joints(0.2))[0].positions_rad
+    hand = HandBoundary(actual)
+    glove = GloveBoundary(_joints(0.0))
+    events = hand.events = glove.events = []
+    stopped = []
+    monkeypatch.setattr(hand, "emergency_stop", lambda: stopped.append("hand"), raising=False)
+    monkeypatch.setattr(glove, "emergency_stop", lambda: stopped.append("glove"), raising=False)
+    monkeypatch.setattr(glove, "enable_force_feedback", lambda: events.append("force_enable"), raising=False)
+    monkeypatch.setattr(glove, "validate_force_current", lambda current: None, raising=False)
+    currents = []
+    monkeypatch.setattr(
+        glove, "send_force_current",
+        lambda current, **kwargs: currents.append(current) or current, raising=False,
+    )
+
+    class Force:
+        def validate_inputs(self, hand_state, glove_state, *, now_ns):
+            events.append("feedback_preflight")
+
+        def prepare(self, hand_state, glove_state, *, now_ns):
+            events.append("geometry_prepare")
+
+        def reset(self, *, now_ns):
+            events.append("force_reset")
+
+        def compute(self, hand_state, glove_state, **kwargs):
+            events.append("compute")
+            return ForceFeedbackCommand(
+                (0.0,) * 12, None, None, "test", 1,
+                projection_status="refreshing_age",
+            )
+
+        def acknowledge(self, current):
+            pass
+
+    loop = RealWujiControlLoop(
+        hand, bridge, glove_driver=glove, force_feedback=Force(),
+        glove_follow_actual=True, startup_transition_s=1e-6,
+    )
+    loop.enable(now_ns=10)
+    assert events.index("geometry_prepare") < events.index("enable_hand")
+    loop.step(inference_positions_rad=target, now_ns=100)
+    prior = loop.step(inference_positions_rad=target, now_ns=1100)
+    loop.request_mode(ControlMode.GLOVE_TAKEOVER, now_ns=1200, duration_s=1e-6)
+    assert events.count("geometry_prepare") == 1
+    before = len(glove.positions)
+    takeover = loop.step(now_ns=1200)
+    np.testing.assert_allclose(takeover.sent_positions_rad, prior.sent_positions_rad)
+    assert len(glove.positions) == before
+    assert takeover.force_feedback.projection_status == "refreshing_age"
+    assert currents[-1] == (0.0,) * 12
+    loop.request_mode(ControlMode.INFERENCE, now_ns=1300, duration_s=1e-6)
+    resumed = loop.step(inference_positions_rad=target, now_ns=1300)
+    np.testing.assert_allclose(resumed.sent_positions_rad, takeover.sent_positions_rad)
+    hand.validation_error = RuntimeError("feedback lost")
+    with pytest.raises(RuntimeError, match="feedback lost"):
+        loop.step(inference_positions_rad=target, now_ns=1400)
+    assert stopped == ["hand", "glove"]
+
+
+def test_standalone_playback_disable_releases_and_reanchors(bridge, monkeypatch):
+    hand = HandBoundary(np.full(20, 0.1))
+    stopped = []
+    monkeypatch.setattr(hand, "disable", lambda: stopped.append("disable"), raising=False)
+    loop = RealWujiControlLoop(
+        hand, bridge, compute_shadow_glove=False, startup_transition_s=1e-6,
+    )
+    loop.enable(now_ns=10)
+    loop.step(inference_positions_rad=np.full(20, 0.4), now_ns=100)
+    loop.step(inference_positions_rad=np.full(20, 0.4), now_ns=1100)
+    loop.disable()
+    assert stopped == ["disable"]
+    hand.state = WujiState(np.full(20, 0.2), None, None, 7, 20)
+    loop.enable(now_ns=1200)
+    restarted = loop.step(inference_positions_rad=np.full(20, 0.4), now_ns=1300)
+    np.testing.assert_allclose(restarted.sent_positions_rad, 0.2)
+
+
+def test_playback_prewarms_inverse_before_enabling_and_resamples(bridge, monkeypatch):
+    first = bridge.glove_to_hand2(_joints(0.05))[0].positions_rad
+    measured = bridge.glove_to_hand2(_joints(0.12))[0].positions_rad
+    hand = HandBoundary(first)
+    glove = GloveBoundary(_joints(0.0))
+    events = hand.events = glove.events = []
+    inputs = []
+    solve = bridge.hand2_to_glove
+
+    def inverse(q, **kwargs):
+        events.append("inverse")
+        inputs.append((q.copy(), kwargs["timestamp_ns"]))
+        return solve(q, **kwargs)
+
+    monkeypatch.setattr(bridge, "hand2_to_glove", inverse)
+    loop = RealWujiControlLoop(
+        hand, bridge, glove_driver=glove, glove_follow_actual=True,
+        startup_transition_s=1e-6,
+    )
+    loop.enable(now_ns=10)
+    assert events.index("inverse") < events.index("enable_hand")
+    np.testing.assert_array_equal(inputs[0][0], first)
+    assert inputs[0][1] == 7
+    hand.state = WujiState(measured, None, None, 20, 20)
+    loop.step(inference_positions_rad=first, now_ns=20)
+    assert len(inputs) == 2
+    np.testing.assert_array_equal(inputs[1][0], measured)
+
+
+def test_failed_playback_inverse_prewarm_never_enables_hand(bridge, monkeypatch):
+    hand = HandBoundary(np.zeros(20))
+    glove = GloveBoundary(_joints(0.0))
+    stopped = []
+    monkeypatch.setattr(hand, "emergency_stop", lambda: stopped.append("hand"), raising=False)
+    monkeypatch.setattr(glove, "emergency_stop", lambda: stopped.append("glove"), raising=False)
+    monkeypatch.setattr(
+        bridge, "hand2_to_glove",
+        lambda *args, **kwargs: (SimpleNamespace(success=False), None),
+    )
+    loop = RealWujiControlLoop(hand, bridge, glove_driver=glove, glove_follow_actual=True)
+    with pytest.raises(ValueError, match="预热未收敛"):
+        loop.enable(now_ns=10)
+    assert "enable_hand" not in hand.events
+    assert stopped == ["hand", "glove"]

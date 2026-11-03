@@ -269,6 +269,64 @@ def test_infeasible_motor_limits_do_not_commit_a_falsely_successful_solution():
     assert solver._last_successful_seed is None
 
 
+def test_successful_optimizer_with_gross_motor_violation_is_rejected(monkeypatch):
+    """优化器误报成功时，大幅越过电机限位仍不得生成可发送姿态。"""
+    from types import SimpleNamespace
+    import wujihand2_force_glove.bidirectional as bidirectional
+
+    model = _model()
+    solver = GloveInverseSolver(model)
+    motor = model.landmarks.model.motor_names[0]
+    solver.set_motor_limits({motor: (-0.1, 0.1)})
+    delta = np.zeros(12)
+    delta[0] = 0.4
+    monkeypatch.setattr(
+        bidirectional, "minimize",
+        lambda *_args, **_kwargs: SimpleNamespace(success=True, x=delta, nfev=1),
+    )
+    result = solver.solve(model.state(_joints(np.zeros(12))))
+    assert not result.success and not result.tree_positions_rad
+    assert motor in result.failure_reason
+    assert solver._last_successful_seed is None
+
+
+def test_recorded_hand_pose_at_motor_boundary_produces_feasible_cad_tree():
+    """相邻实测姿态在SLSQP微小电机边界误差下仍须得到真实可发的闭链解。"""
+    from wujihand2_force_glove.real_hand.runtime import create_retargeter
+
+    frames = np.array([
+        [0.1141602441508376, -0.518103999115052, 0.19393482140009408, 0.08768142988872857,
+         0.14472091306151072, -0.004362273931419676, 0.03849080231264553, 0.05031555657732201,
+         0.2315718108026555, -0.008484213337287634, -0.05176778781632943, 0.001098385993483624,
+         0.14815424762755222, 0.0005322718918614999, 0.03910854840737881, 0.04530845310282869,
+         0.14527239666949066, -0.007641107249994229, 0.011731388468491533, -0.0022021105329943095],
+        [0.10421795661231588, -0.5180054903030396, 0.19264700447556152, 0.07663700402186077,
+         0.14509865319926848, -0.0043634544701540105, 0.013519809201406125, 0.03238005485588303,
+         0.23261307855622815, -0.008499541564058875, -0.06875705339700657, -0.01213941902942094,
+         0.1383466911248636, 0.0005291938333290266, 0.0002415374139070228, 0.026558058934444344,
+         0.14687765364893207, -0.007858785354136217, -0.009259297250261206, -0.005534207261432143],
+    ])
+    bridge = create_retargeter(project_root=Path(__file__).resolve().parents[1])
+    model = bridge.inverse.glove_model.landmarks.model
+    limits = {
+        name: (-np.pi / 2, np.pi / 2) if index < 2 else (0.0, np.pi / 2)
+        for index, name in enumerate(model.motor_names)
+    }
+    bridge.inverse.set_motor_limits(limits)
+    results = [bridge.hand2_to_glove(frame, timestamp_ns=stamp)
+               for stamp, frame in enumerate(frames, 1)]
+    assert results[0][0].success and results[1][0].success
+    for result, target in results:
+        actual = model.kinematics.evaluate_tree(result.tree_positions_rad)
+        for name, (lower, upper) in limits.items():
+            assert lower <= actual.motor_positions[name] <= upper
+        actual_q = [actual.joint_positions[f"{name}_joint"] for name in GLOVE_JOINTS]
+        np.testing.assert_allclose(result.glove_positions_rad, actual_q, rtol=0, atol=1e-10)
+        points = bridge.inverse.glove_model.state_from_tree(result.tree_positions_rad)
+        error_mm = np.linalg.norm(points.points_m - target.points_m, axis=1) * 1000
+        assert result.task_error_max_mm == pytest.approx(np.max(error_mm), abs=1e-8)
+
+
 def test_failed_or_unconverged_inverse_does_not_commit_successful_seed():
     model = _model()
     solver = GloveInverseSolver(model, regularization_weight=0.0)

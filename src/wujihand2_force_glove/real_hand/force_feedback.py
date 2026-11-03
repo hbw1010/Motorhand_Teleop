@@ -487,6 +487,11 @@ class ForceFeedbackController:
             for parent in parents:
                 parent.close()
 
+    def validate_inputs(self, hand2_state: WujiState, glove_state: EncosGloveState, *,
+                        now_ns: int) -> None:
+        """在取得输出权之前检查实测反馈与标定，不等待几何计算。"""
+        self._validate_inputs(hand2_state, glove_state, now_ns)
+
     def prepare(self, hand2_state: WujiState, glove_state: EncosGloveState, *,
                 now_ns: int | None = None, timeout_s: float = 2) -> None:
         timeout_s = _positive(timeout_s, "timeout_s")
