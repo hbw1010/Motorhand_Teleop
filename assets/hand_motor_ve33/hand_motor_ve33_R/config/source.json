@@ -1,0 +1,66 @@
+{
+  "assembly": "C:\\Users\\current robotics\\Desktop\\vE.3.3\\手部电机外骨骼-右手.SLDASM",
+  "configuration": "默认",
+  "hidden": [
+    "大拇指电机外骨骼-2/测试-F68811-1"
+  ],
+  "visible": 93,
+  "unique_meshes": 36,
+  "active": 12,
+  "tree_joints": 72,
+  "closures": 28,
+  "cad_to_base": [
+    [
+      0.0,
+      0.0,
+      -1.0,
+      0.04
+    ],
+    [
+      -1.0,
+      8.36534599342605e-34,
+      0.0,
+      0.0
+    ],
+    [
+      -8.365345993426268e-34,
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "coordinate_units": "metres",
+  "joint_zero": "源右手 CAD 装配零位",
+  "fixed_by_user": [
+    "four finger abduction",
+    "pinky CMC"
+  ],
+  "coordinate_reference": "V1.4 R 完整 XYZ 零位世界朝向；详见 coordinate_alignment.json",
+  "side": "R",
+  "robot": "hand_motor_ve33_right_v14_coordinates",
+  "source_hashes": {
+    "hand_tree_only.urdf": "65a4bf8a041be887bc2c79c8fd8ae4d11ca045322f86be3f029fae6df6ba53f7",
+    "original_archive": "6ed21a53532e1ad5c10ada3d1fca51ad2df7118a09bbb1cb722dee8d7ccabd8c",
+    "config/assembly_branches.json": "d2bdf1f27ea86bbf6ceb0f027fb27674008e4f2abbd2a55628df3e153915086f",
+    "config/cad_components.json": "af9721a267213fe38b30be42c703deb3a159ab8c8a3b208422eea5b93058d9ae",
+    "config/coordinate_alignment.json": "7229354387fe9208040dbd8f5ee089626f535106ecfd6c65229cea201e806c03",
+    "config/joint_roles.json": "19b1da93c33bbc56664ae61e970a4170945b16703d2ef1e758dd7107083658cb",
+    "config/loop_closures.yaml": "8529ef124c8b7d2973344a155997869dc6c4f75f6748349bc1d892c6d117a26c",
+    "config/motor_definitions.json": "47170cc833c17b12f2317bbaf1ecd267ca73128b19b7f34bf5e561cab66ba71d",
+    "config/source.json": "018f48f31c5ff6fc7334b625e68e6fd2ac34e8bbc5e849c64fd2c2e0077280fe"
+  },
+  "reference_source": {
+    "reference_archive": "hand_v14_urdf.zip",
+    "reference_archive_sha256": "6ed21a53532e1ad5c10ada3d1fca51ad2df7118a09bbb1cb722dee8d7ccabd8c",
+    "reference_urdf": "R/hand_tree_only.urdf",
+    "reference_urdf_sha256": "2f99e4a19f718f1756da9e8acddc51d08953b0621663e3f74d48f012450e1510"
+  },
+  "geometry_source_side": "R",
+  "geometry_derivation": "源右手 CAD 几何保持不变"
+}

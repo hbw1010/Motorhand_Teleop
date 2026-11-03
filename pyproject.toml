@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wujihand2-force-glove"
+version = "0.1.0"
+description = "WujiHand2 force-feedback and teleoperation research framework"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "scipy>=1.11,<2",
+  "python-can>=4.3",
+  "pyserial>=3.5",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[[tool.setuptools.ext-modules]]
+name = "wujihand2_force_glove._ve33_geometry"
+sources = ["src/wujihand2_force_glove/native/ve33_geometry.cpp"]
+language = "c++"
+extra-compile-args = ["-O3", "-std=c++17"]
+
+[tool.setuptools.package-data]
+wujihand2_force_glove = [
+  "real_hand/native/*.cpp",
+  "real_hand/native/*.h",
+  "real_hand/native/CMakeLists.txt",
+  "real_hand/native/tests/*.cpp",
+  "real_hand/native/tests/*.c",
+  "real_hand/native/tests/*.h",
+]
+
+[project.scripts]
+wujihand2-force-glove = "wujihand2_force_glove.cli:main"
+wujihand2-force-glove-real = "wujihand2_force_glove.real_hand.runtime:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

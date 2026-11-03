@@ -1,0 +1,31 @@
+{
+  "version": "3.17.0",
+  "compiled": true,
+  "bodies_including_world": 74,
+  "hinge_joints": 68,
+  "equality_connects": 56,
+  "mesh_count": 93,
+  "checks": [
+    {
+      "all_motor_angle_rad": 0,
+      "equality_residual_m": 1.3877787807814457e-17,
+      "urdf_mjcf_frame_difference": 5.598227511685644e-16
+    },
+    {
+      "all_motor_angle_rad": 0.2,
+      "equality_residual_m": 1.2193478865496488e-11,
+      "urdf_mjcf_frame_difference": 1.3322676295501878e-15
+    },
+    {
+      "all_motor_angle_rad": 0.4,
+      "equality_residual_m": 6.245004513516506e-17,
+      "urdf_mjcf_frame_difference": 7.771561172376096e-16
+    },
+    {
+      "all_motor_angle_rad": 0,
+      "equality_residual_m": 2.5118795932144167e-15,
+      "urdf_mjcf_frame_difference": 5.59826139300349e-16
+    }
+  ],
+  "dynamics_validated": false
+}

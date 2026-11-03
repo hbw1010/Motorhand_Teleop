@@ -1,0 +1,76 @@
+{
+  "engine": {
+    "repository": "https://github.com/OpenLegged/URDF-Studio",
+    "commit": "23b96e2f3d5b1b68ad9629925d4479e9847d35a5",
+    "three": "0.181.2"
+  },
+  "steps": 598,
+  "maxResidual": 9.995203674166798e-06,
+  "maxJointStepRad": 0.08809024229867357,
+  "notConverged": 0,
+  "flips": 0,
+  "clamped": 37,
+  "details": [
+    {
+      "joint": "middle_mcp_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 0.0006620592300109144
+    },
+    {
+      "joint": "middle_pip_dip_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 4.4109297582297854e-05
+    },
+    {
+      "joint": "index_mcp_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 0.0006620592306810485
+    },
+    {
+      "joint": "index_pip_dip_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 4.342755371344268e-05
+    },
+    {
+      "joint": "ring_mcp_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 0.0006620592301643836
+    },
+    {
+      "joint": "ring_pip_dip_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 4.221212657451673e-05
+    },
+    {
+      "joint": "pinky_mcp_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 0.6088652381982492
+    },
+    {
+      "joint": "pinky_pip_dip_motor_joint",
+      "steps": 26,
+      "return_drift_rad": 0.0006673174292685779
+    },
+    {
+      "joint": "thumb_cmc_flex_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 0
+    },
+    {
+      "joint": "thumb_cmc_abd_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 0
+    },
+    {
+      "joint": "thumb_mcp_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 0.0011734108374643615
+    },
+    {
+      "joint": "thumb_ip_motor_joint",
+      "steps": 52,
+      "return_drift_rad": 7.82052455055378e-06
+    }
+  ],
+  "coordinate_convention": "Previous vE.3.3 export before V1.4 frame alignment; historical diagnostic only"
+}

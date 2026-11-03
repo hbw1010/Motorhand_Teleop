@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "joint": "index_pip_dip_motor_joint",
+      "median_ms": 2.1550500000557804,
+      "p95_ms": 2.584964999959993,
+      "max_gap_m": 1.086108692045682e-16
+    },
+    {
+      "joint": "pinky_mcp_motor_joint",
+      "median_ms": 2.4965499999325402,
+      "p95_ms": 2.8829250001535907,
+      "max_gap_m": 1.147088144683972e-11
+    },
+    {
+      "joint": "thumb_cmc_abd_motor_joint",
+      "median_ms": 0.966950000020006,
+      "p95_ms": 1.2842500002534498,
+      "max_gap_m": 4.220764384040162e-17
+    }
+  ],
+  "steps": 126,
+  "coordinate_convention": "Previous vE.3.3 export before V1.4 frame alignment; historical diagnostic only"
+}

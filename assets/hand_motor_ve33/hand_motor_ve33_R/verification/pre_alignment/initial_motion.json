@@ -1,0 +1,584 @@
+{
+  "jacobian_rank": 56,
+  "mobility": 12,
+  "zero_gap_m": 7.152448122690996e-18,
+  "cases": [
+    {
+      "joint": "middle_mcp_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 6.86985540511656e-16,
+      "max_passive_rad": 0.10003449729026845,
+      "seconds": 0.23399999999946886
+    },
+    {
+      "joint": "middle_mcp_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 2.797157557069881e-17,
+      "max_passive_rad": 0.10003001436749148,
+      "seconds": 0.23400000000037835
+    },
+    {
+      "joint": "middle_mcp_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 2.7938785714365832e-14,
+      "max_passive_rad": 0.30012595091973354,
+      "seconds": 0.7190000000000509
+    },
+    {
+      "joint": "middle_mcp_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 5.815852873680767e-17,
+      "max_passive_rad": 0.3000815048512159,
+      "seconds": 0.7190000000000509
+    },
+    {
+      "joint": "middle_mcp_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 9.20559024108479e-12,
+      "max_passive_rad": 0.6004160223245423,
+      "seconds": 1.4369999999998981
+    },
+    {
+      "joint": "middle_mcp_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 1.8671459840876684e-16,
+      "max_passive_rad": 0.6001485127493309,
+      "seconds": 1.4380000000001019
+    },
+    {
+      "joint": "middle_pip_dip_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 1.1188630228279524e-16,
+      "max_passive_rad": 0.06647747950813417,
+      "seconds": 0.18699999999989814
+    },
+    {
+      "joint": "middle_pip_dip_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 3.7458781815585322e-16,
+      "max_passive_rad": 0.06253887836666606,
+      "seconds": 0.18800000000010186
+    },
+    {
+      "joint": "middle_pip_dip_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 9.022229924233907e-17,
+      "max_passive_rad": 0.2102510990101625,
+      "seconds": 0.5779999999995198
+    },
+    {
+      "joint": "middle_pip_dip_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 8.584690619247314e-17,
+      "max_passive_rad": 0.17528735540899537,
+      "seconds": 0.5630000000001019
+    },
+    {
+      "joint": "middle_pip_dip_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 9.020562075079397e-17,
+      "max_passive_rad": 0.46271824453153027,
+      "seconds": 1.1400000000003274
+    },
+    {
+      "joint": "middle_pip_dip_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 7.473417450352271e-17,
+      "max_passive_rad": 0.31447948608263027,
+      "seconds": 1.1880000000001019
+    },
+    {
+      "joint": "index_mcp_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 6.507132512371991e-16,
+      "max_passive_rad": 0.10003449729034304,
+      "seconds": 0.23399999999946886
+    },
+    {
+      "joint": "index_mcp_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 1.4304896245381992e-17,
+      "max_passive_rad": 0.10003001436750925,
+      "seconds": 0.23400000000037835
+    },
+    {
+      "joint": "index_mcp_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 2.6994460921412738e-14,
+      "max_passive_rad": 0.30012595092014394,
+      "seconds": 0.7190000000000509
+    },
+    {
+      "joint": "index_mcp_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 5.647850449853784e-17,
+      "max_passive_rad": 0.3000815048512725,
+      "seconds": 0.7190000000000509
+    },
+    {
+      "joint": "index_mcp_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 9.229821322089474e-12,
+      "max_passive_rad": 0.6004160223034789,
+      "seconds": 1.4369999999998981
+    },
+    {
+      "joint": "index_mcp_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 1.8177385842962546e-16,
+      "max_passive_rad": 0.6001485127494651,
+      "seconds": 1.4539999999997235
+    },
+    {
+      "joint": "index_pip_dip_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 1.4059824081336194e-16,
+      "max_passive_rad": 0.06659402967194836,
+      "seconds": 0.20300000000042928
+    },
+    {
+      "joint": "index_pip_dip_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 2.4905216576336253e-16,
+      "max_passive_rad": 0.06257778997765268,
+      "seconds": 0.18699999999989814
+    },
+    {
+      "joint": "index_pip_dip_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 1.5823112613210482e-16,
+      "max_passive_rad": 0.21075875160648,
+      "seconds": 0.5779999999995198
+    },
+    {
+      "joint": "index_pip_dip_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 5.1019748043878786e-17,
+      "max_passive_rad": 0.1751320437364433,
+      "seconds": 0.5780000000004293
+    },
+    {
+      "joint": "index_pip_dip_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 3.060201685278755e-16,
+      "max_passive_rad": 0.45780355251242,
+      "seconds": 1.1570000000001528
+    },
+    {
+      "joint": "index_pip_dip_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 5.647850449853784e-17,
+      "max_passive_rad": 0.3134385310644726,
+      "seconds": 1.1719999999995707
+    },
+    {
+      "joint": "ring_mcp_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 6.765782947381428e-16,
+      "max_passive_rad": 0.10003449729034461,
+      "seconds": 0.23499999999967258
+    },
+    {
+      "joint": "ring_mcp_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 1.6996749443881478e-17,
+      "max_passive_rad": 0.10003001436757922,
+      "seconds": 0.23400000000037835
+    },
+    {
+      "joint": "ring_mcp_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 2.6044393946461764e-14,
+      "max_passive_rad": 0.30012595091947464,
+      "seconds": 0.7190000000000509
+    },
+    {
+      "joint": "ring_mcp_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 3.555125210177728e-17,
+      "max_passive_rad": 0.30008150485150076,
+      "seconds": 0.7179999999998472
+    },
+    {
+      "joint": "ring_mcp_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 9.248284940157988e-12,
+      "max_passive_rad": 0.6004160223224527,
+      "seconds": 1.4070000000001528
+    },
+    {
+      "joint": "ring_mcp_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 1.8097747405888788e-16,
+      "max_passive_rad": 0.6001485127499971,
+      "seconds": 1.4219999999995707
+    },
+    {
+      "joint": "ring_pip_dip_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 7.765673273041129e-17,
+      "max_passive_rad": 0.06673115696286736,
+      "seconds": 0.18699999999989814
+    },
+    {
+      "joint": "ring_pip_dip_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 3.205860975196866e-16,
+      "max_passive_rad": 0.06278024000839501,
+      "seconds": 0.18800000000010186
+    },
+    {
+      "joint": "ring_pip_dip_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 3.1165213701798805e-16,
+      "max_passive_rad": 0.2110239895174495,
+      "seconds": 0.5780000000004293
+    },
+    {
+      "joint": "ring_pip_dip_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 5.96906223549092e-17,
+      "max_passive_rad": 0.17594709065625447,
+      "seconds": 0.5779999999995198
+    },
+    {
+      "joint": "ring_pip_dip_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 1.1102230246251565e-16,
+      "max_passive_rad": 0.460162677293247,
+      "seconds": 1.155999999999949
+    },
+    {
+      "joint": "ring_pip_dip_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 5.892955481736847e-17,
+      "max_passive_rad": 0.3155312700276728,
+      "seconds": 1.1410000000005311
+    },
+    {
+      "joint": "pinky_mcp_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 1.5914536586103605e-14,
+      "max_passive_rad": 0.10004767651934944,
+      "seconds": 0.23399999999946886
+    },
+    {
+      "joint": "pinky_mcp_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 2.0888836804026048e-17,
+      "max_passive_rad": 0.10003906298637852,
+      "seconds": 0.25
+    },
+    {
+      "joint": "pinky_mcp_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 9.072331328686938e-13,
+      "max_passive_rad": 0.30019081442784395,
+      "seconds": 0.7030000000004293
+    },
+    {
+      "joint": "pinky_mcp_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 2.110382192020081e-17,
+      "max_passive_rad": 0.3001013609134073,
+      "seconds": 0.7190000000000509
+    },
+    {
+      "joint": "pinky_mcp_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 2.1440798906460654e-13,
+      "max_passive_rad": 0.6009071967110572,
+      "seconds": 1.5469999999995707
+    },
+    {
+      "joint": "pinky_mcp_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 9.739201700399851e-17,
+      "max_passive_rad": 0.6001745925121018,
+      "seconds": 1.4369999999998981
+    },
+    {
+      "joint": "pinky_pip_dip_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 2.5431409568573912e-12,
+      "max_passive_rad": 0.16874242734561434,
+      "seconds": 0.20300000000042928
+    },
+    {
+      "joint": "pinky_pip_dip_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 1.7668599564125708e-11,
+      "max_passive_rad": 0.1638552988366567,
+      "seconds": 0.18800000000010186
+    },
+    {
+      "joint": "pinky_pip_dip_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 4.2672079119327266e-14,
+      "max_passive_rad": 0.5175744895079405,
+      "seconds": 0.6089999999994689
+    },
+    {
+      "joint": "pinky_pip_dip_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 2.054053976514409e-15,
+      "max_passive_rad": 0.4777829217709191,
+      "seconds": 0.6410000000005311
+    },
+    {
+      "joint": "pinky_pip_dip_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 1.4820153943300317e-15,
+      "max_passive_rad": 1.030772910034018,
+      "seconds": 1.125
+    },
+    {
+      "joint": "pinky_pip_dip_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 8.81001957789326e-12,
+      "max_passive_rad": 0.7087559933035016,
+      "seconds": 1.4369999999998981
+    },
+    {
+      "joint": "thumb_cmc_flex_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 1.3877787807814457e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.032000000000152795
+    },
+    {
+      "joint": "thumb_cmc_flex_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 1.4304896245381992e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.04699999999957072
+    },
+    {
+      "joint": "thumb_cmc_flex_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 2.7755575615628914e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.10900000000037835
+    },
+    {
+      "joint": "thumb_cmc_flex_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 1.7690777709386487e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.10899999999946886
+    },
+    {
+      "joint": "thumb_cmc_flex_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 3.1031676915590914e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.21900000000005093
+    },
+    {
+      "joint": "thumb_cmc_flex_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 1.5515838457795457e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.23400000000037835
+    },
+    {
+      "joint": "thumb_cmc_abd_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 2.0816681711721685e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.032000000000152795
+    },
+    {
+      "joint": "thumb_cmc_abd_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 1.962615573354719e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.04699999999957072
+    },
+    {
+      "joint": "thumb_cmc_abd_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 2.0816681711721685e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.10900000000037835
+    },
+    {
+      "joint": "thumb_cmc_abd_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 2.1457344368072987e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.10899999999946886
+    },
+    {
+      "joint": "thumb_cmc_abd_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 2.110382192020081e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.21900000000005093
+    },
+    {
+      "joint": "thumb_cmc_abd_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 1.5515838457795457e-17,
+      "max_passive_rad": 0.0,
+      "seconds": 0.21900000000005093
+    },
+    {
+      "joint": "thumb_mcp_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 2.2215299868541707e-17,
+      "max_passive_rad": 0.10003383257684306,
+      "seconds": 0.15599999999994907
+    },
+    {
+      "joint": "thumb_mcp_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 3.0308275211152088e-15,
+      "max_passive_rad": 0.1000399824321832,
+      "seconds": 0.1720000000004802
+    },
+    {
+      "joint": "thumb_mcp_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 4.443059973708341e-17,
+      "max_passive_rad": 0.30008990514235334,
+      "seconds": 0.5
+    },
+    {
+      "joint": "thumb_mcp_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 1.5234421526654624e-13,
+      "max_passive_rad": 0.300152056951305,
+      "seconds": 0.5
+    },
+    {
+      "joint": "thumb_mcp_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 6.546139416680338e-17,
+      "max_passive_rad": 0.6001593760334749,
+      "seconds": 1.0
+    },
+    {
+      "joint": "thumb_mcp_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 1.2041930091882112e-15,
+      "max_passive_rad": 0.6005787151515366,
+      "seconds": 1.030999999999949
+    },
+    {
+      "joint": "thumb_ip_motor_joint",
+      "target": 0.1,
+      "status": "pass",
+      "gap_m": 9.824536617670628e-16,
+      "max_passive_rad": 0.06713237810496857,
+      "seconds": 0.14099999999962165
+    },
+    {
+      "joint": "thumb_ip_motor_joint",
+      "target": -0.1,
+      "status": "pass",
+      "gap_m": 5.873012585496357e-16,
+      "max_passive_rad": 0.07128409013242946,
+      "seconds": 0.125
+    },
+    {
+      "joint": "thumb_ip_motor_joint",
+      "target": 0.3,
+      "status": "pass",
+      "gap_m": 1.4419089986114876e-16,
+      "max_passive_rad": 0.1877968679707278,
+      "seconds": 0.3900000000003274
+    },
+    {
+      "joint": "thumb_ip_motor_joint",
+      "target": -0.3,
+      "status": "pass",
+      "gap_m": 8.976255344763835e-16,
+      "max_passive_rad": 0.22474270098056648,
+      "seconds": 0.4070000000001528
+    },
+    {
+      "joint": "thumb_ip_motor_joint",
+      "target": 0.6,
+      "status": "pass",
+      "gap_m": 5.099024833164444e-17,
+      "max_passive_rad": 0.33402194253271733,
+      "seconds": 0.8119999999998981
+    },
+    {
+      "joint": "thumb_ip_motor_joint",
+      "target": -0.6,
+      "status": "pass",
+      "gap_m": 2.7097559270463557e-16,
+      "max_passive_rad": 0.4762020658092014,
+      "seconds": 0.8130000000001019
+    }
+  ],
+  "coordinate_convention": "Previous vE.3.3 export before V1.4 frame alignment; historical diagnostic only"
+}

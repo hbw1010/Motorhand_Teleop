@@ -1,0 +1,73 @@
+{
+  "reference": "C:\\Users\\current robotics\\Documents\\Codex\\2026-10-13\\error-code-unsupported-country-region-territory\\outputs\\hand_v14_J_named\\R\\hand_tree_only.urdf",
+  "motor_axes_local_z": true,
+  "mesh_pose_cases": 96,
+  "max_visual_transform_error": 1.2458784004465429e-14,
+  "max_closure_gap_m": 2.0243990321123785e-11,
+  "positive_directions": [
+    {
+      "motor": "middle_mcp_motor_joint",
+      "reference_joint": "J10",
+      "positive_output_rate": 1.000319907208365
+    },
+    {
+      "motor": "middle_pip_dip_motor_joint",
+      "reference_joint": "J11",
+      "positive_output_rate": 0.5471227303512589,
+      "positive_dip_relative_rate": 0.11509588245926576
+    },
+    {
+      "motor": "index_mcp_motor_joint",
+      "reference_joint": "J6",
+      "positive_output_rate": 1.000319907215631
+    },
+    {
+      "motor": "index_pip_dip_motor_joint",
+      "reference_joint": "J7",
+      "positive_output_rate": 0.5499552934297276,
+      "positive_dip_relative_rate": 0.10980754212198411
+    },
+    {
+      "motor": "ring_mcp_motor_joint",
+      "reference_joint": "J14",
+      "positive_output_rate": 1.0003199072155429
+    },
+    {
+      "motor": "ring_pip_dip_motor_joint",
+      "reference_joint": "J15",
+      "positive_output_rate": 0.5496182555642537,
+      "positive_dip_relative_rate": 0.11254457215183186
+    },
+    {
+      "motor": "pinky_mcp_motor_joint",
+      "reference_joint": "J18",
+      "positive_output_rate": 1.0004279469962607
+    },
+    {
+      "motor": "pinky_pip_dip_motor_joint",
+      "reference_joint": "J19",
+      "positive_output_rate": 1.0579693920426283,
+      "positive_dip_relative_rate": 0.020549958098260067
+    },
+    {
+      "motor": "thumb_cmc_flex_motor_joint",
+      "reference_joint": "J1",
+      "positive_output_rate": 1.0000000000000002
+    },
+    {
+      "motor": "thumb_cmc_abd_motor_joint",
+      "reference_joint": "J2",
+      "positive_output_rate": 0.9993123098159766
+    },
+    {
+      "motor": "thumb_mcp_motor_joint",
+      "reference_joint": "J3",
+      "positive_output_rate": 0.9951341293652962
+    },
+    {
+      "motor": "thumb_ip_motor_joint",
+      "reference_joint": "J4",
+      "positive_output_rate": 0.5952980855821993
+    }
+  ]
+}

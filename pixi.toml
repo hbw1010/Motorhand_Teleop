@@ -1,0 +1,68 @@
+[workspace]
+name = "wujihand2-force-glove"
+version = "0.1.0"
+description = "自研屈伸电机手套驱动 WujiHand2 的映射、力反馈与接管实验"
+channels = ["conda-forge"]
+platforms = [{ platform = "linux-64", glibc = "2.34" }]
+
+[dependencies]
+python = ">=3.12,<3.13"
+numpy = ">=1.26,<3"
+scipy = ">=1.11,<2"
+pyyaml = ">=6,<7"
+pinocchio = ">=3.8,<4"
+nlopt = ">=2.7,<3"
+mujoco = ">=3.2,<4"
+pytest = ">=8,<10"
+python-can = ">=4.3.0"
+pyserial = ">=3.5"
+pyqt = ">=5.15"
+cxx-compiler = ">=1.11,<2"
+
+[pypi-dependencies]
+wujihand2-force-glove = { path = ".", editable = true }
+wuji-retargeting = { path = "vendor/wuji-retargeting", editable = true }
+
+encos-hand = { path = "hardware/encos_dexhand", editable = true }
+
+[activation.env]
+PYTHONNOUSERSITE = "1"
+OPENBLAS_NUM_THREADS = "1"
+OMP_NUM_THREADS = "1"
+
+[tasks]
+demo = "python -m wujihand2_force_glove.cli demo"
+validate-assets = "python -m wujihand2_force_glove.cli validate-assets"
+test = "python -m pytest -q"
+test-glove-chain = "python -m pytest -o addopts='' tests/test_ve33_native.py tests/test_ve33_motor_roundtrip.py tests/test_ve33_adapter.py tests/test_encos_hardware.py tests/test_encos_controller.py tests/test_encos_zero_step.py tests/test_hardware_control_coordinates.py tests/test_hardware.py tests/test_bidirectional.py tests/test_bidirectional_models.py tests/test_landmarks.py tests/test_retargeting.py tests/test_feedback.py tests/test_force_feedback.py tests/test_contact_feedback.py tests/test_contact_runtime.py tests/test_force_linear.py tests/test_curve_telemetry.py tests/test_wuji_native.py tests/test_real_hand_runtime.py tests/test_inverse_realtime.py -q --tb=short"
+strict-validation = "python -m wujihand2_force_glove.validation"
+mujoco-force-feedback = "python -m wujihand2_force_glove.mujoco_sim"
+mujoco-viewer = "python -m wujihand2_force_glove.mujoco_viewer"
+encos-test = "python hardware/encos_dexhand/examples/test_12_motors.py"
+encos-home = "python -m wujihand2_force_glove.encos_home"
+encos-zero-step = "python -m wujihand2_force_glove.encos_zero_step"
+encos-zero-index = "python -m wujihand2_force_glove.encos_zero_step --finger index --sync-mapping /home/boen/hand/dex_glove/hardware/encos_dexhand/configs/glove_mapping.json"
+encos-zero-middle = "python -m wujihand2_force_glove.encos_zero_step --finger middle --sync-mapping /home/boen/hand/dex_glove/hardware/encos_dexhand/configs/glove_mapping.json"
+encos-zero-ring = "python -m wujihand2_force_glove.encos_zero_step --finger ring --sync-mapping /home/boen/hand/dex_glove/hardware/encos_dexhand/configs/glove_mapping.json"
+encos-zero-pinky = "python -m wujihand2_force_glove.encos_zero_step --finger pinky --sync-mapping /home/boen/hand/dex_glove/hardware/encos_dexhand/configs/glove_mapping.json"
+gui = "python hardware/encos_dexhand/apps/gui_master.py"
+encos-live-viewer = "python -m wujihand2_force_glove.encos_live_viewer"
+build-real-hand = "cmake -S src/wujihand2_force_glove/real_hand/native -B .cache/native-real-hand/build -DREAL_HAND_BUILD_TESTS=ON && cmake --build .cache/native-real-hand/build --parallel"
+test-real-hand-native = "ctest --test-dir .cache/native-real-hand/build --output-on-failure"
+real-hand = "python -m wujihand2_force_glove.real_hand"
+wuji-teleop = "python -m wujihand2_force_glove.real_hand follow --mode glove-to-hand2 --wuji-serial WH2KA01260814006 --hand right --glove-hand right --approved-firmware 2.2.3 --rate 50 --execute"
+wuji-force-linear = "python -m wujihand2_force_glove.real_hand follow --mode glove-to-hand2 --wuji-serial WH2KA01260814006 --hand right --glove-hand right --approved-firmware 2.2.3 --rate 50 --feedback-linear-config config/feedback/max-torque-linear-right.json --execute"
+force-ui = "python -m wujihand2_force_glove.real_hand.force_curves"
+plotjuggler = "bash scripts/ros_plotjuggler.sh plot"
+plotjuggler-pinky = "bash scripts/ros_plotjuggler.sh plot --nosplash --buffer_size 20 --layout config/plotjuggler-pinky-right.xml"
+plotjuggler-bridge = "bash scripts/ros_plotjuggler.sh bridge"
+plotjuggler-demo = "bash scripts/ros_plotjuggler.sh demo"
+wuji-force-contact = "python -m wujihand2_force_glove.real_hand follow --mode glove-to-hand2 --wuji-serial WH2KA01260814006 --hand right --glove-hand right --approved-firmware 2.2.3 --rate 50 --feedback-linear-config config/feedback/max-torque-linear-right.json --contact-feedback-config config/feedback/contact-impedance-right.json --execute"
+wuji-discover = "python -m wujihand2_force_glove.real_hand discover"
+
+[feature.hardware.pypi-dependencies]
+wuji-sdk = "==2026.8.31"
+
+[environments]
+default = { features = [], solve-group = "default" }
+hardware = { features = ["hardware"], solve-group = "default" }

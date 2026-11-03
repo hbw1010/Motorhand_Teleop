@@ -1,0 +1,1520 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="hand_motor_ve33_left_v14_coordinates">
+  <!--12 active motor inputs; 56 passive moving joints solved by loop_closures.yaml; 4 fixed mounts. See hand.srdf and config/joint_roles.json.-->
+  <link name="base_link">
+    <visual name="base_link_part_2">
+      <origin xyz="0.00229999999999999 -0.022875 0.012500000000000001" rpy="-1.5707963267948972 0 -3.1415926535897931" />
+      <geometry>
+        <mesh filename="meshes/base_link_part_2.stl" />
+      </geometry>
+      <material name="material_18">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+    <visual name="base_link_part_3">
+      <origin xyz="0.059000000000000011 0.036512920266670398 -0.0067984541726030922" rpy="-1.5707963267948966 0.78539816339744695 1.570796326794897" />
+      <geometry>
+        <mesh filename="meshes/base_link_part_3.stl" />
+      </geometry>
+      <material name="material_37">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+    <visual name="base_link">
+      <origin xyz="0.040000000000000001 0 0" rpy="-1.5707963267948966 0 1.570796326794897" />
+      <geometry>
+        <mesh filename="meshes/base_link.stl" />
+      </geometry>
+      <material name="material_56">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_mount_link">
+    <visual name="middle_mount_link_part_2">
+      <origin xyz="-3.4694469519536142e-18 -3.8248968695530503e-33 0.0025000000000000001" rpy="3.1415926535897931 0 0.57870963485806293" />
+      <geometry>
+        <mesh filename="meshes/middle_mount_link_part_2.stl" />
+      </geometry>
+      <material name="material_10">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+    <visual name="middle_mount_link">
+      <origin xyz="-3.4694469519536142e-18 -3.8518598887744744e-33 6.8422776578360239e-49" rpy="-1.5707963267948972 0 -3.1415926535897922" />
+      <geometry>
+        <mesh filename="meshes/middle_mount_link.stl" />
+      </geometry>
+      <material name="material_15">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_mcp_link">
+    <visual name="middle_mcp_link_part_2">
+      <origin xyz="0.033316519865951404 0.015693283799242425 0.011098961791559999" rpy="-3.1415926535897918 -6.6613381477509392e-16 1.3089542022029632" />
+      <geometry>
+        <mesh filename="meshes/middle_mcp_link_part_2.stl" />
+      </geometry>
+      <material name="material_0">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="middle_mcp_link">
+      <origin xyz="0.0049081169079628374 0.019091883092036067 -0.0099999999999999881" rpy="1.5707963267948954 -4.4408920985006262e-16 3.1415926535897931" />
+      <geometry>
+        <mesh filename="meshes/middle_mcp_link.stl" />
+      </geometry>
+      <material name="material_6">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_pip_link">
+    <visual name="middle_pip_link">
+      <origin xyz="-0.0071099999999999905 0.015199999999999993 0.001500000000000015" rpy="1.5707963267948957 -6.6613381477509392e-16 3.1415926535897931" />
+      <geometry>
+        <mesh filename="meshes/middle_pip_link.stl" />
+      </geometry>
+      <material name="material_8">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_dip_link">
+    <visual name="middle_dip_link">
+      <origin xyz="-0.0049199999999999825 0.019550000000000008 -0.010499999999999983" rpy="-1.5707963267948957 4.4408920985006262e-16 -3.3306690738754696e-16" />
+      <geometry>
+        <mesh filename="meshes/middle_dip_link.stl" />
+      </geometry>
+      <material name="material_7">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_mcp_connecting_rod_1">
+    <visual name="middle_mcp_connecting_rod_1">
+      <origin xyz="-0.014999999999999979 -0.0061999999999999928 -0.016000000000000035" rpy="-1.5707963267948966 1.5707963267948948 0" />
+      <geometry>
+        <mesh filename="meshes/middle_mcp_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_11">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_mcp_connecting_rod_2">
+    <visual name="middle_mcp_connecting_rod_2">
+      <origin xyz="-2.9982236587413464e-19 0.0015 4.9960006822365906e-19" rpy="-1.5707963267948966 1.5707963267947167 0" />
+      <geometry>
+        <mesh filename="meshes/middle_mcp_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_12">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_mcp_connecting_rod_3">
+    <visual name="middle_mcp_connecting_rod_3_part_2">
+      <origin xyz="0.025466795335932903 0.022598961791559985 0.028645130869838848" rpy="1.5707963267948972 -0.34910858719160709 -4.4408920985006262e-16" />
+      <geometry>
+        <mesh filename="meshes/middle_mcp_connecting_rod_3_part_2.stl" />
+      </geometry>
+      <material name="material_9">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="middle_mcp_connecting_rod_3">
+      <origin xyz="-4.8072656133808714e-17 0.0015 1.9012580960122455e-18" rpy="-1.570796326794897 0.78539816339741408 3.1415926535897927" />
+      <geometry>
+        <mesh filename="meshes/middle_mcp_connecting_rod_3.stl" />
+      </geometry>
+      <material name="material_13">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_mcp_connecting_rod_4">
+    <visual name="middle_mcp_connecting_rod_4">
+      <origin xyz="-0.014849242404923109 0.0014999999999999569 -0.01484924240491434" rpy="-1.5707963267948977 0.78539816339741408 3.1415926535897922" />
+      <geometry>
+        <mesh filename="meshes/middle_mcp_connecting_rod_4.stl" />
+      </geometry>
+      <material name="material_14">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_mcp_connecting_rod_6">
+    <visual name="middle_mcp_connecting_rod_6">
+      <origin xyz="0.0081752424321005698 -0.0059999999999999967 -0.0057589418451988467" rpy="-1.5707963267948966 0.61369749847719746 7.7715611723760958e-16" />
+      <geometry>
+        <mesh filename="meshes/middle_mcp_connecting_rod_6.stl" />
+      </geometry>
+      <material name="material_17">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_mcp_drive_link">
+    <visual name="middle_mcp_drive_link">
+      <origin xyz="0.0075012098340142622 -0.0027517178318439352 -4.6054329129355437e-18" rpy="3.0531133177191805e-16 6.6613381477509392e-16 -0.35159452374739431" />
+      <geometry>
+        <mesh filename="meshes/middle_mcp_drive_link.stl" />
+      </geometry>
+      <material name="material_16">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_pip_dip_drive_link">
+    <visual name="middle_pip_dip_drive_link">
+      <origin xyz="0.005514712210795969 -0.009373023750748638 -9.7335083997115904e-18" rpy="-1.5543122344752192e-15 -8.8817841970012523e-16 2.1026130333960964" />
+      <geometry>
+        <mesh filename="meshes/middle_pip_dip_drive_link.stl" />
+      </geometry>
+      <material name="material_3">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_pip_connecting_rod_1">
+    <visual name="middle_pip_connecting_rod_1">
+      <origin xyz="0.0022375940465985396 -0.0014999999999999911 -0.029415016112227889" rpy="-1.5707963267949021 -1.4948727600185068 -3.1415926535897887" />
+      <geometry>
+        <mesh filename="meshes/middle_pip_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_4">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_pip_connecting_rod_2">
+    <visual name="middle_pip_connecting_rod_2">
+      <origin xyz="0.0059994143230643901 0.0035000000000000018 0.0053298829987355025" rpy="-1.5707963267948966 -0.72636947966229715 0" />
+      <geometry>
+        <mesh filename="meshes/middle_pip_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_5">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_dip_connecting_rod_1">
+    <visual name="middle_dip_connecting_rod_1">
+      <origin xyz="-0.0040734203417161791 -0.0034999999999999992 0.00011345360149821063" rpy="-1.5707963267948974 -0.02784497269310493 -3.1415926535897931" />
+      <geometry>
+        <mesh filename="meshes/middle_dip_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_2">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="middle_dip_connecting_rod_2">
+    <visual name="middle_dip_connecting_rod_2">
+      <origin xyz="0.0010735656416707149 -0.0034999999999999892 -0.014284714971360963" rpy="1.5707963267949012 1.4957824948853076 4.2188474935755949e-15" />
+      <geometry>
+        <mesh filename="meshes/middle_dip_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_1">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_mount_link">
+    <visual name="index_mount_link_part_2">
+      <origin xyz="3.4694469519536142e-18 4.0418994286768124e-35 0.0025000000000000001" rpy="3.1415926535897931 0 0.57870963485806315" />
+      <geometry>
+        <mesh filename="meshes/index_mount_link_part_2.stl" />
+      </geometry>
+      <material name="material_76">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+    <visual name="index_mount_link">
+      <origin xyz="3.4694469519536142e-18 -4.276423536147513e-50 0" rpy="-1.5707963267948972 0 -3.1415926535897931" />
+      <geometry>
+        <mesh filename="meshes/index_mount_link.stl" />
+      </geometry>
+      <material name="material_81">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_mcp_link">
+    <visual name="index_mcp_link_part_2">
+      <origin xyz="0.02931651986595225 0.015693283799244499 0.011098961791559994" rpy="-3.1415926535897918 -8.8817841970012523e-16 1.3089542022029632" />
+      <geometry>
+        <mesh filename="meshes/index_mcp_link_part_2.stl" />
+      </geometry>
+      <material name="material_84">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="index_mcp_link">
+      <origin xyz="0.0029081169079636779 0.019091883092038117 -0.009999999999999995" rpy="1.5707963267948966 0 -3.1415926535897913" />
+      <geometry>
+        <mesh filename="meshes/index_mcp_link.stl" />
+      </geometry>
+      <material name="material_90">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_pip_link">
+    <visual name="index_pip_link">
+      <origin xyz="-0.0086200000000000027 0.015199999999999995 0.0015000000000000174" rpy="1.5707963267948961 0 -3.1415926535897918" />
+      <geometry>
+        <mesh filename="meshes/index_pip_link.stl" />
+      </geometry>
+      <material name="material_92">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_dip_link">
+    <visual name="index_dip_link">
+      <origin xyz="-0.006030000000000005 0.019410000000000014 -0.0099999999999999811" rpy="-1.570796326794895 -2.2204460492503131e-16 1.1102230246251565e-15" />
+      <geometry>
+        <mesh filename="meshes/index_dip_link.stl" />
+      </geometry>
+      <material name="material_91">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_mcp_connecting_rod_1">
+    <visual name="index_mcp_connecting_rod_1">
+      <origin xyz="-0.014999999999998768 -0.0061999999999999946 -0.016000000000001166" rpy="-1.5707963267948974 1.5707963267948188 0" />
+      <geometry>
+        <mesh filename="meshes/index_mcp_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_77">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_mcp_connecting_rod_2">
+    <visual name="index_mcp_connecting_rod_2">
+      <origin xyz="-7.0293904803818591e-20 0.0015000000000000039 5.8360307108971608e-19" rpy="-1.5707963267948959 1.5707963267947944 0" />
+      <geometry>
+        <mesh filename="meshes/index_mcp_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_78">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_mcp_connecting_rod_3">
+    <visual name="index_mcp_connecting_rod_3_part_2">
+      <origin xyz="0.025466795335934999 0.022598961791559988 0.028645130869837401" rpy="1.5707963267948974 -0.34910858719155269 -2.2204460492503131e-16" />
+      <geometry>
+        <mesh filename="meshes/index_mcp_connecting_rod_3_part_2.stl" />
+      </geometry>
+      <material name="material_75">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="index_mcp_connecting_rod_3">
+      <origin xyz="5.863513568715512e-16 0.0015000000000000219 -1.3329229651424152e-18" rpy="-1.5707963267948974 0.78539816339735813 3.1415926535897913" />
+      <geometry>
+        <mesh filename="meshes/index_mcp_connecting_rod_3.stl" />
+      </geometry>
+      <material name="material_79">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_mcp_connecting_rod_4">
+    <visual name="index_mcp_connecting_rod_4">
+      <origin xyz="-0.014849242404920219 0.0014999999999999439 -0.0148492424049159" rpy="-1.5707963267948979 0.78539816339742696 3.1415926535897927" />
+      <geometry>
+        <mesh filename="meshes/index_mcp_connecting_rod_4.stl" />
+      </geometry>
+      <material name="material_80">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_mcp_connecting_rod_6">
+    <visual name="index_mcp_connecting_rod_6">
+      <origin xyz="0.0081752424321004605 -0.0060000000000000036 -0.0057589418451989838" rpy="-1.5707963267948974 0.61369749847721566 0" />
+      <geometry>
+        <mesh filename="meshes/index_mcp_connecting_rod_6.stl" />
+      </geometry>
+      <material name="material_83">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_mcp_drive_link">
+    <visual name="index_mcp_drive_link">
+      <origin xyz="0.0075012098340139742 -0.0027517178318446842 -1.9556272724729643e-18" rpy="3.3306690738754696e-16 4.4408920985006262e-16 -0.35159452374749423" />
+      <geometry>
+        <mesh filename="meshes/index_mcp_drive_link.stl" />
+      </geometry>
+      <material name="material_82">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_pip_dip_drive_link">
+    <visual name="index_pip_dip_drive_link">
+      <origin xyz="0.0054890883627487091 -0.0093880527238579432 -7.8081172398132301e-18" rpy="-2.2204460492503131e-15 -6.6613381477509392e-16 2.0998814383142301" />
+      <geometry>
+        <mesh filename="meshes/index_pip_dip_drive_link.stl" />
+      </geometry>
+      <material name="material_87">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_pip_connecting_rod_1">
+    <visual name="index_pip_connecting_rod_1">
+      <origin xyz="0.0017988232745025888 -0.001499999999999855 -0.029445105447715888" rpy="-1.5707963267948997 -1.5097814157731477 -3.1415926535897909" />
+      <geometry>
+        <mesh filename="meshes/index_pip_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_88">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_pip_connecting_rod_2">
+    <visual name="index_pip_connecting_rod_2">
+      <origin xyz="0.0059872952436510855 0.003499999999999873 0.0053434933017037535" rpy="-1.5707963267948966 -0.72864037761698175 -8.8817841970012523e-16" />
+      <geometry>
+        <mesh filename="meshes/index_pip_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_89">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_dip_connecting_rod_1">
+    <visual name="index_dip_connecting_rod_1">
+      <origin xyz="-0.0040509692858445995 -0.0035000000000000001 0.00044189687161571363" rpy="-1.5707963267948974 -0.10865461683752287 -3.1415926535897931" />
+      <geometry>
+        <mesh filename="meshes/index_dip_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_86">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="index_dip_connecting_rod_2">
+    <visual name="index_dip_connecting_rod_2">
+      <origin xyz="-0.00070208741478128723 -0.0035000000000001675 -0.01430778453367277" rpy="-1.5707963267949103 1.5217653459178559 3.1415926535897793" />
+      <geometry>
+        <mesh filename="meshes/index_dip_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_85">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_mount_link">
+    <visual name="ring_mount_link_part_2">
+      <origin xyz="6.9388939039072284e-18 -1.0817674756876192e-32 0.0025000000000000001" rpy="3.1415926535897931 0 0.57870963485806315" />
+      <geometry>
+        <mesh filename="meshes/ring_mount_link_part_2.stl" />
+      </geometry>
+      <material name="material_67">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+    <visual name="ring_mount_link">
+      <origin xyz="6.9388939039072284e-18 -1.0785207688568533e-32 0" rpy="-1.5707963267948972 0 -3.1415926535897931" />
+      <geometry>
+        <mesh filename="meshes/ring_mount_link.stl" />
+      </geometry>
+      <material name="material_72">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_mcp_link">
+    <visual name="ring_mcp_link_part_2">
+      <origin xyz="0.029316519865951428 0.0156932837992423 0.011098961791560023" rpy="3.1415926535897931 -8.8817841970012523e-16 1.3089542022029612" />
+      <geometry>
+        <mesh filename="meshes/ring_mcp_link_part_2.stl" />
+      </geometry>
+      <material name="material_58">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="ring_mcp_link">
+      <origin xyz="0.0029081169079628552 0.019091883092035959 -0.0099999999999999811" rpy="1.5707963267948952 6.6613381477509392e-16 3.1415926535897918" />
+      <geometry>
+        <mesh filename="meshes/ring_mcp_link.stl" />
+      </geometry>
+      <material name="material_64">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_pip_link">
+    <visual name="ring_pip_link">
+      <origin xyz="-0.0081099999999999922 0.01520000000000001 0.0015000000000000102" rpy="1.5707963267948961 6.6613381477509392e-16 3.1415926535897927" />
+      <geometry>
+        <mesh filename="meshes/ring_pip_link.stl" />
+      </geometry>
+      <material name="material_66">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_dip_link">
+    <visual name="ring_dip_link">
+      <origin xyz="-0.0056899999999999685 0.019420000000000021 -0.0099999999999999707" rpy="-1.570796326794895 -6.6613381477509392e-16 -4.4408920985006262e-16" />
+      <geometry>
+        <mesh filename="meshes/ring_dip_link.stl" />
+      </geometry>
+      <material name="material_65">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_mcp_connecting_rod_1">
+    <visual name="ring_mcp_connecting_rod_1">
+      <origin xyz="-0.014999999999999972 -0.0061999999999999876 -0.016000000000000042" rpy="-1.5707963267948974 1.5707963267948948 0" />
+      <geometry>
+        <mesh filename="meshes/ring_mcp_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_68">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_mcp_connecting_rod_2">
+    <visual name="ring_mcp_connecting_rod_2">
+      <origin xyz="6.3060046306455513e-18 0.0015000000000000009 8.9416587480523545e-19" rpy="-1.5707963267948966 1.5707963267947167 0" />
+      <geometry>
+        <mesh filename="meshes/ring_mcp_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_69">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_mcp_connecting_rod_3">
+    <visual name="ring_mcp_connecting_rod_3_part_2">
+      <origin xyz="0.025466795335932876 0.022598961791559992 0.028645130869838751" rpy="1.5707963267948977 -0.34910858719160509 0" />
+      <geometry>
+        <mesh filename="meshes/ring_mcp_connecting_rod_3_part_2.stl" />
+      </geometry>
+      <material name="material_57">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="ring_mcp_connecting_rod_3">
+      <origin xyz="-3.1558080843984024e-17 0.0015000000000000009 2.4623597650174099e-18" rpy="-1.5707963267948979 0.78539816339741098 3.1415926535897927" />
+      <geometry>
+        <mesh filename="meshes/ring_mcp_connecting_rod_3.stl" />
+      </geometry>
+      <material name="material_70">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_mcp_connecting_rod_4">
+    <visual name="ring_mcp_connecting_rod_4">
+      <origin xyz="-0.014849242404923102 0.0014999999999999658 -0.014849242404914318" rpy="-1.5707963267948979 0.78539816339741408 3.1415926535897927" />
+      <geometry>
+        <mesh filename="meshes/ring_mcp_connecting_rod_4.stl" />
+      </geometry>
+      <material name="material_71">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_mcp_connecting_rod_6">
+    <visual name="ring_mcp_connecting_rod_6">
+      <origin xyz="0.0081752424320989045 -0.0059999999999999984 -0.0057589418452012216" rpy="-1.5707963267948961 0.61369749847748789 3.3306690738754696e-16" />
+      <geometry>
+        <mesh filename="meshes/ring_mcp_connecting_rod_6.stl" />
+      </geometry>
+      <material name="material_74">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_mcp_drive_link">
+    <visual name="ring_mcp_drive_link">
+      <origin xyz="0.0075012098340131207 -0.002751717831847023 -1.2282198764909528e-18" rpy="6.106226635438361e-16 2.2204460492503131e-16 -0.35159452374780525" />
+      <geometry>
+        <mesh filename="meshes/ring_mcp_drive_link.stl" />
+      </geometry>
+      <material name="material_73">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_pip_dip_drive_link">
+    <visual name="ring_pip_dip_drive_link">
+      <origin xyz="0.0055606290963515353 -0.0093458562503822493 -8.484637432324809e-18" rpy="-2.2204460492503131e-16 -6.6613381477509392e-16 2.1075189672402255" />
+      <geometry>
+        <mesh filename="meshes/ring_pip_dip_drive_link.stl" />
+      </geometry>
+      <material name="material_61">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_pip_connecting_rod_1">
+    <visual name="ring_pip_connecting_rod_1">
+      <origin xyz="0.0021865223477938876 -0.0014999999999999796 -0.029418856538325849" rpy="-1.5707963267949026 -1.4966088920688241 -3.1415926535897869" />
+      <geometry>
+        <mesh filename="meshes/ring_pip_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_62">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_pip_connecting_rod_2">
+    <visual name="ring_pip_connecting_rod_2">
+      <origin xyz="0.0060319135547585835 0.0035000000000000053 0.0052930750861781388" rpy="-1.5707963267948961 -0.72025082042591804 3.3306690738754696e-16" />
+      <geometry>
+        <mesh filename="meshes/ring_pip_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_63">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_dip_connecting_rod_1">
+    <visual name="ring_dip_connecting_rod_1">
+      <origin xyz="-0.0040664956794922696 -0.0035000000000000009 0.00026313093446161056" rpy="-1.5707963267948977 -0.064616965502079182 -3.1415926535897931" />
+      <geometry>
+        <mesh filename="meshes/ring_dip_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_60">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="ring_dip_connecting_rod_2">
+    <visual name="ring_dip_connecting_rod_2">
+      <origin xyz="0.0001874792478714094 -0.0034999999999999862 -0.014323773124830531" rpy="1.5707963267949596 1.5577083965805292 6.4059868520871532e-14" />
+      <geometry>
+        <mesh filename="meshes/ring_dip_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_59">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_mount_link">
+    <visual name="pinky_mount_link_part_2">
+      <origin xyz="3.7493994566546628e-35 -6.9388939039072284e-18 0.0025000000000000001" rpy="-3.1415926535897909 -1.5543122344752192e-15 0.57870963485806337" />
+      <geometry>
+        <mesh filename="meshes/pinky_mount_link_part_2.stl" />
+      </geometry>
+      <material name="material_48">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+    <visual name="pinky_mount_link">
+      <origin xyz="0 0 0" rpy="-1.5707963267949001 0 -3.1415926535897931" />
+      <geometry>
+        <mesh filename="meshes/pinky_mount_link.stl" />
+      </geometry>
+      <material name="material_53">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_mcp_link">
+    <visual name="pinky_mcp_link_part_2">
+      <origin xyz="0.020921839176507785 0.018718505903004452 0.011098961791560034" rpy="3.1415926535897927 -1.7763568394002505e-15 1.3089542022029623" />
+      <geometry>
+        <mesh filename="meshes/pinky_mcp_link_part_2.stl" />
+      </geometry>
+      <material name="material_38">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="pinky_mcp_link">
+      <origin xyz="0.00051343621851923139 0.022117105195798122 -0.0099999999999999725" rpy="1.5707963267948948 4.4408920985006262e-16 3.1415926535897931" />
+      <geometry>
+        <mesh filename="meshes/pinky_mcp_link.stl" />
+      </geometry>
+      <material name="material_44">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_pip_link">
+    <visual name="pinky_pip_link">
+      <origin xyz="-0.0054100000000000129 0.012560000000000003 0.0015000000000000189" rpy="1.5707963267948943 4.4408920985006262e-16 -3.1415926535897927" />
+      <geometry>
+        <mesh filename="meshes/pinky_pip_link.stl" />
+      </geometry>
+      <material name="material_46">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_dip_link">
+    <visual name="pinky_dip_link">
+      <origin xyz="-0.011759999999999977 0.014070000000000036 -0.0089999999999999906" rpy="-1.5707963267948948 -4.4408920985006262e-16 -3.3306690738754696e-16" />
+      <geometry>
+        <mesh filename="meshes/pinky_dip_link.stl" />
+      </geometry>
+      <material name="material_45">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_mcp_connecting_rod_1">
+    <visual name="pinky_mcp_connecting_rod_1">
+      <origin xyz="-0.01500000000000481 -0.006199999999999979 -0.015999999999995532" rpy="-1.5707963267948966 1.5707963267945968 0" />
+      <geometry>
+        <mesh filename="meshes/pinky_mcp_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_49">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_mcp_connecting_rod_2">
+    <visual name="pinky_mcp_connecting_rod_2">
+      <origin xyz="-1.0717134033539574e-17 0.0015000000000000013 1.7727878457363487e-18" rpy="-1.5707963267948966 1.5707963267947149 0" />
+      <geometry>
+        <mesh filename="meshes/pinky_mcp_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_50">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_mcp_connecting_rod_3">
+    <visual name="pinky_mcp_connecting_rod_3_part_2">
+      <origin xyz="0.020105722716622892 0.022598961791559957 0.032632209567768702" rpy="1.5707963267948979 -0.52364151239106937 0" />
+      <geometry>
+        <mesh filename="meshes/pinky_mcp_connecting_rod_3_part_2.stl" />
+      </geometry>
+      <material name="material_47">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="pinky_mcp_connecting_rod_3">
+      <origin xyz="-6.5902328520923368e-17 0.0015000000000000013 2.2104114321400732e-17" rpy="-1.5707963267948983 0.95993108859687615 3.1415926535897922" />
+      <geometry>
+        <mesh filename="meshes/pinky_mcp_connecting_rod_3.stl" />
+      </geometry>
+      <material name="material_51">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_mcp_connecting_rod_4">
+    <visual name="pinky_mcp_connecting_rod_4">
+      <origin xyz="-0.01204510516337714 0.0015000000000000044 -0.017202192930066612" rpy="-1.5707963267948992 0.9599310885968495 3.1415926535897913" />
+      <geometry>
+        <mesh filename="meshes/pinky_mcp_connecting_rod_4.stl" />
+      </geometry>
+      <material name="material_52">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_mcp_connecting_rod_6">
+    <visual name="pinky_mcp_connecting_rod_6">
+      <origin xyz="0.0090509319730973439 -0.0059999999999999932 -0.004252132455411544" rpy="-1.5707963267948952 0.43919747874338988 9.9920072216264089e-16" />
+      <geometry>
+        <mesh filename="meshes/pinky_mcp_connecting_rod_6.stl" />
+      </geometry>
+      <material name="material_55">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_mcp_drive_link">
+    <visual name="pinky_mcp_drive_link">
+      <origin xyz="0.0075010330690461306 -0.0027521996470235436 -2.5256335153833543e-18" rpy="2.1926904736346842e-15 4.4408920985006262e-16 -0.35165875616684561" />
+      <geometry>
+        <mesh filename="meshes/pinky_mcp_drive_link.stl" />
+      </geometry>
+      <material name="material_54">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_pip_dip_drive_link">
+    <visual name="pinky_pip_dip_drive_link">
+      <origin xyz="0.008099383595416676 -0.0072571075763209689 -1.0474257706901762e-17" rpy="-1.5543122344752192e-15 -1.3322676295501878e-15 2.4109877966419271" />
+      <geometry>
+        <mesh filename="meshes/pinky_pip_dip_drive_link.stl" />
+      </geometry>
+      <material name="material_41">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_pip_connecting_rod_1">
+    <visual name="pinky_pip_connecting_rod_1">
+      <origin xyz="-0.0095610586004163389 -0.0014999999999999812 -0.027907636202993746" rpy="1.5707963267948999 -1.2407322137655756 -4.4408920985006262e-15" />
+      <geometry>
+        <mesh filename="meshes/pinky_pip_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_42">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_pip_connecting_rod_2">
+    <visual name="pinky_pip_connecting_rod_2">
+      <origin xyz="0.0059279134430279684 0.0035000000000000148 0.0054092945207126399" rpy="-1.570796326794895 -0.73968517789864618 -6.6613381477509392e-16" />
+      <geometry>
+        <mesh filename="meshes/pinky_pip_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_43">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_dip_connecting_rod_1">
+    <visual name="pinky_dip_connecting_rod_1">
+      <origin xyz="-0.0037564426588731622 -0.0035000000000000027 0.0015794820513693403" rpy="-1.5707963267948968 -0.39802984781702522 3.1415926535897905" />
+      <geometry>
+        <mesh filename="meshes/pinky_dip_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_40">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="pinky_dip_connecting_rod_2">
+    <visual name="pinky_dip_connecting_rod_2">
+      <origin xyz="-0.0018457976607375557 -0.0034999999999999741 -0.014205585380251436" rpy="-1.570796326794903 1.4415855944010874 3.1415926535897869" />
+      <geometry>
+        <mesh filename="meshes/pinky_dip_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_39">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_cmc_flex_link">
+    <visual name="thumb_cmc_flex_link_part_2">
+      <origin xyz="-0.022866029308209697 -0.014357740200884449 -0.014099999999999821" rpy="3.1415926535897931 -4.8849813083506888e-15 2.131483348998076" />
+      <geometry>
+        <mesh filename="meshes/thumb_cmc_flex_link_part_2.stl" />
+      </geometry>
+      <material name="material_20">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+    <visual name="thumb_cmc_flex_link">
+      <origin xyz="9.6805732429418877e-34 1.6257299108526928e-17 0.0088999999999999965" rpy="-1.5707963267948961 0 2.1314833489980747" />
+      <geometry>
+        <mesh filename="meshes/thumb_cmc_flex_link.stl" />
+      </geometry>
+      <material name="material_21">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+    <visual name="thumb_cmc_flex_link_part_3">
+      <origin xyz="0.012404639295157983 0.019144839664578757 0.040498961791559991" rpy="3.1415926535897918 0 0.5606870222031799" />
+      <geometry>
+        <mesh filename="meshes/thumb_cmc_flex_link_part_3.stl" />
+      </geometry>
+      <material name="material_26">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="thumb_cmc_flex_link_part_4">
+      <origin xyz="-0.047053432776156888 -0.040901060142073432 -0.051785980732313705" rpy="-0.56068702220317923 1.5707963267948881 0" />
+      <geometry>
+        <mesh filename="meshes/thumb_cmc_flex_link_part_4.stl" />
+      </geometry>
+      <material name="material_27">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_cmc_abd_link">
+    <visual name="thumb_cmc_abd_link">
+      <origin xyz="0.018673589047083959 -0.0048961285036227898 -0.019705963507949554" rpy="-1.5617129702194843 -0.035959230182342816 2.8941092818786727" />
+      <geometry>
+        <mesh filename="meshes/thumb_cmc_abd_link.stl" />
+      </geometry>
+      <material name="material_19">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+    <visual name="thumb_cmc_abd_link_part_2">
+      <origin xyz="0.03795899387798897 -0.0097922570072455136 -0.022923273903935483" rpy="-1.5617129702194843 -0.035959230182342816 2.8941092818786727" />
+      <geometry>
+        <mesh filename="meshes/thumb_cmc_abd_link_part_2.stl" />
+      </geometry>
+      <material name="material_32">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_mcp_link">
+    <visual name="thumb_mcp_link_part_2">
+      <origin xyz="0.028030994597216811 -0.035016749294135389 0.015599364006349229" rpy="3.1200125475256097 -0.100017109840421 -0.94981784246279144" />
+      <geometry>
+        <mesh filename="meshes/thumb_mcp_link_part_2.stl" />
+      </geometry>
+      <material name="material_25">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="thumb_mcp_link">
+      <origin xyz="0.018302328505241487 0.0094284370089387035 -0.010195344805396895" rpy="1.5835443213949245 0.10151658273209851 2.1040331109151809" />
+      <geometry>
+        <mesh filename="meshes/thumb_mcp_link.stl" />
+      </geometry>
+      <material name="material_35">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_ip_link">
+    <visual name="thumb_ip_link">
+      <origin xyz="0.0078499161558823975 0.015906657821865341 -0.013242245024304088" rpy="-1.583544321394923 -0.10151658273209718 -1.0375595426746107" />
+      <geometry>
+        <mesh filename="meshes/thumb_ip_link.stl" />
+      </geometry>
+      <material name="material_36">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_mcp_connecting_rod_1">
+    <visual name="thumb_mcp_connecting_rod_1">
+      <origin xyz="0.0050093094599252402 0.022110511726344768 -0.0023392498656352907" rpy="0.24732003773310424 7.5495165674510645e-15 0.56068702220315969" />
+      <geometry>
+        <mesh filename="meshes/thumb_mcp_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_28">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_mcp_connecting_rod_2">
+    <visual name="thumb_mcp_connecting_rod_2">
+      <origin xyz="0.00019527039179210914 -0.00031098616072387726 0.0014543579621013386" rpy="0.24732003773310418 -3.4194869158454821e-14 0.56068702220332312" />
+      <geometry>
+        <mesh filename="meshes/thumb_mcp_connecting_rod_2.stl" />
+      </geometry>
+      <material name="material_29">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_mcp_connecting_rod_3">
+    <visual name="thumb_mcp_connecting_rod_3_part_2">
+      <origin xyz="-0.011311572459234696 -0.039821955167621159 0.016311789491540198" rpy="3.0352787016463041 0.22372728605720971 -1.4584379950130129" />
+      <geometry>
+        <mesh filename="meshes/thumb_mcp_connecting_rod_3_part_2.stl" />
+      </geometry>
+      <material name="material_24">
+        <color rgba="0.22 0.28 0.32 1" />
+      </material>
+    </visual>
+    <visual name="thumb_mcp_connecting_rod_3">
+      <origin xyz="0.00019527039179211242 -0.00031098616072386349 0.0014543579621013412" rpy="-2.9505339462357911 -0.15801529265514924 1.2436462448061179" />
+      <geometry>
+        <mesh filename="meshes/thumb_mcp_connecting_rod_3.stl" />
+      </geometry>
+      <material name="material_30">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_mcp_connecting_rod_4">
+    <visual name="thumb_mcp_connecting_rod_4">
+      <origin xyz="0.0068594545261649997 0.019327464289797588 0.0047588872365423784" rpy="-2.9505339462357911 -0.15801529265514902 1.2436462448061174" />
+      <geometry>
+        <mesh filename="meshes/thumb_mcp_connecting_rod_4.stl" />
+      </geometry>
+      <material name="material_31">
+        <color rgba="0.66 0.76 0.84 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_mcp_connecting_rod_6">
+    <visual name="thumb_mcp_connecting_rod_6">
+      <origin xyz="0.0079319914767806352 -0.0031835143205913938 -0.0079340246900843903" rpy="0.12619238502905969 0.21327239777421791 -0.47013820361043068" />
+      <geometry>
+        <mesh filename="meshes/thumb_mcp_connecting_rod_6.stl" />
+      </geometry>
+      <material name="material_34">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_mcp_drive_link">
+    <visual name="thumb_mcp_drive_link">
+      <origin xyz="0.0014218745579973383 -0.0078221619585419917 0.00079508177922664144" rpy="0.023115355457235864 -0.099674572265720851 -1.3909844951541117" />
+      <geometry>
+        <mesh filename="meshes/thumb_mcp_drive_link.stl" />
+      </geometry>
+      <material name="material_33">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_ip_drive_link">
+    <visual name="thumb_ip_drive_link">
+      <origin xyz="-0.0048384894596355367 -0.0090779407675015116 0.0092030232082027565" rpy="-0.075795451878790221 0.06878725310871503 1.1437134391779831" />
+      <geometry>
+        <mesh filename="meshes/thumb_ip_drive_link.stl" />
+      </geometry>
+      <material name="material_22">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <link name="thumb_ip_connecting_rod_1">
+    <visual name="thumb_ip_connecting_rod_1">
+      <origin xyz="0.011969986263365493 0.0078748409796867772 -0.0014703514544108373" rpy="-2.8942750843225493 0.0011164743896812102 0.55626513558216639" />
+      <geometry>
+        <mesh filename="meshes/thumb_ip_connecting_rod_1.stl" />
+      </geometry>
+      <material name="material_23">
+        <color rgba="0.8 0.64 0.31 1" />
+      </material>
+    </visual>
+  </link>
+  <!--FIXED MOUNT-->
+  <joint name="middle_mount_fixed_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="middle_mount_link" />
+    <origin xyz="0.069999999999999993 -4.3368086899420177e-19 0.0045000000000000014" rpy="0 0 0" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_mcp_connecting_rod_joint_3" type="revolute">
+    <parent link="middle_mount_link" />
+    <child link="middle_mcp_connecting_rod_3" />
+    <origin xyz="0 -0.0015 0.0069999999999999984" rpy="0 0 -4.1053665947016113e-48" />
+    <axis xyz="2.2204460492503052e-16 1 3.3306690738754691e-16" />
+    <limit lower="-0.78339816339770441" upper="2.3541944901920888" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="middle_mcp_motor_joint" type="continuous">
+    <parent link="middle_mcp_connecting_rod_3" />
+    <child link="middle_mcp_drive_link" />
+    <origin xyz="0.0027389785598088273 0.0014999999999999942 0.030606331118744879" rpy="-1.5707963267948966 0 0" />
+    <axis xyz="-2.2204460492503052e-16 6.5469143732287423e-16 -1" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_mcp_connecting_rod_joint_6" type="continuous">
+    <parent link="middle_mcp_drive_link" />
+    <child link="middle_mcp_connecting_rod_6" />
+    <origin xyz="0.015002419668028621 -0.0055034356636878374 0.0059999999999999915" rpy="1.570796326794897 4.4408920985006262e-16 0" />
+    <axis xyz="-2.220446049250321e-16 1 3.3306690738754691e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_mcp_connecting_rod_joint_1" type="revolute">
+    <parent link="middle_mcp_connecting_rod_6" />
+    <child link="middle_mcp_connecting_rod_1" />
+    <origin xyz="0.016350484864200071 0.00020000000000000258 -0.01151788369039651" rpy="0 0 0" />
+    <axis xyz="-2.220446049250321e-16 1 3.3306670592515606e-16" />
+    <limit lower="-2.1744503611090598" upper="0.96314229248073346" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_mcp_output_joint" type="continuous">
+    <parent link="middle_mcp_connecting_rod_1" />
+    <child link="middle_mcp_link" />
+    <origin xyz="-0.01499999999999996 0.0038000000000000121 -0.02650000000000003" rpy="-1.5707963267948966 0 4.4408920985006262e-16" />
+    <axis xyz="4.4408920985006183e-16 -7.7715592199916861e-16 1" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_mcp_connecting_rod_joint_2" type="revolute">
+    <parent link="middle_mcp_link" />
+    <child link="middle_mcp_connecting_rod_2" />
+    <origin xyz="-0.004242640687119395 0.0042426406871218488 -0.011499999999999944" rpy="1.570796326794897 4.4408920985006262e-16 0" />
+    <axis xyz="-4.4408920985006341e-16 1 3.8949617682875605e-16" />
+    <limit lower="-2.3541944901928131" upper="0.78339816339698021" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_mcp_connecting_rod_joint_4" type="revolute">
+    <parent link="middle_mcp_connecting_rod_2" />
+    <child link="middle_mcp_connecting_rod_4" />
+    <origin xyz="4.8433479449272454e-15 -9.1072982488760864e-18 0.02700000000000001" rpy="0 0 4.4408920985006262e-16" />
+    <axis xyz="-7.8886090522101181e-31 1 3.8949617682875605e-16" />
+    <limit lower="-0.78339816339756119" upper="2.3541944901922323" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="middle_pip_dip_motor_joint" type="continuous">
+    <parent link="middle_mcp_link" />
+    <child link="middle_pip_dip_drive_link" />
+    <origin xyz="0.037251098439772423 -0.0067770855186945469 -0.010000000000000019" rpy="0 0 0" />
+    <axis xyz="4.4408920985006173e-16 -9.9922008267701021e-16 1" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_pip_connecting_rod_joint_1" type="continuous">
+    <parent link="middle_pip_dip_drive_link" />
+    <child link="middle_pip_connecting_rod_1" />
+    <origin xyz="0.01102942442159191 -0.018746047501497273 0.0014999999999999803" rpy="1.570796326794897 4.4408920985006262e-16 0" />
+    <axis xyz="2.2204460492503042e-16 1 5.5513087282694769e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_pip_connecting_rod_joint_2" type="continuous">
+    <parent link="middle_pip_connecting_rod_1" />
+    <child link="middle_pip_connecting_rod_2" />
+    <origin xyz="0.0061656060839020985 -0.0049999999999999949 -0.02000168931269531" rpy="0 0 -8.3163278125159185e-112" />
+    <axis xyz="2.2204460492503067e-16 1 7.3892574197504061e-20" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_dip_connecting_rod_joint_1" type="revolute">
+    <parent link="middle_pip_connecting_rod_2" />
+    <child link="middle_dip_connecting_rod_1" />
+    <origin xyz="0.011998828646128777 0.0070000000000000001 0.010659765997470996" rpy="0 0 8.3163278125159185e-112" />
+    <axis xyz="4.4408920985006193e-16 1 3.0052427331297768e-16" />
+    <limit lower="-0.75221445235540274" upper="2.3853782012343907" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_dip_connecting_rod_joint_2" type="continuous">
+    <parent link="middle_dip_connecting_rod_1" />
+    <child link="middle_dip_connecting_rod_2" />
+    <origin xyz="0.00023602803322622656 -3.8507190695588663e-18 0.01284633714571836" rpy="0 0 -8.3163278125159185e-112" />
+    <axis xyz="4.4408920985006193e-16 1 3.0052427331297768e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_pip_output_joint" type="revolute">
+    <parent link="middle_pip_connecting_rod_1" />
+    <child link="middle_pip_link" />
+    <origin xyz="0.0022375940465985131 -0.0029999999999999875 -0.029415016112227899" rpy="-1.5707963267948966 0 4.4408920985006262e-16" />
+    <axis xyz="4.4408920985006198e-16 -4.4377004381893659e-16 1" />
+    <limit lower="-1.0317303671565603" upper="2.1058622864332333" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="middle_dip_output_joint" type="revolute">
+    <parent link="middle_dip_connecting_rod_2" />
+    <child link="middle_dip_link" />
+    <origin xyz="0.0021471312833414007 0.007000000000000014 -0.028569429942721936" rpy="-1.5707963267948966 0 4.4408920985006262e-16" />
+    <axis xyz="4.4408920985006193e-16 -7.7715536168595554e-16 1" />
+    <limit lower="-0.5824111828270615" upper="2.5551814707627321" effort="1" velocity="10" />
+  </joint>
+  <!--FIXED MOUNT-->
+  <joint name="index_mount_fixed_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="index_mount_link" />
+    <origin xyz="0.064999999999999988 -0.02399999999999999 0.0045000000000000014" rpy="0 0 0" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_mcp_connecting_rod_joint_3" type="revolute">
+    <parent link="index_mount_link" />
+    <child link="index_mcp_connecting_rod_3" />
+    <origin xyz="0 -0.0015000000000000013 0.0070000000000000019" rpy="0 0 -1.865689910717121e-65" />
+    <axis xyz="1.2325951644078309e-32 1 3.890687140598101e-16" />
+    <limit lower="-0.78339816339757928" upper="2.3541944901922141" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="index_mcp_motor_joint" type="continuous">
+    <parent link="index_mcp_connecting_rod_3" />
+    <child link="index_mcp_drive_link" />
+    <origin xyz="0.0027389785598043448 0.0014999999999999944 0.030606331118745209" rpy="-1.5707963267948966 0 0" />
+    <axis xyz="-1.2325951644078309e-32 7.1069324399513737e-16 -1" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_mcp_connecting_rod_joint_6" type="continuous">
+    <parent link="index_mcp_drive_link" />
+    <child link="index_mcp_connecting_rod_6" />
+    <origin xyz="0.015002419668033923 -0.0055034356636869215 0.0059999999999999993" rpy="1.570796326794897 0 3.3306690738754696e-16" />
+    <axis xyz="4.4408920985006232e-16 1 3.8906871405981024e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_mcp_connecting_rod_joint_1" type="revolute">
+    <parent link="index_mcp_connecting_rod_6" />
+    <child link="index_mcp_connecting_rod_1" />
+    <origin xyz="0.016350484864196175 0.00020000000000000573 -0.011517883690392814" rpy="0 0 0" />
+    <axis xyz="4.4408920985006232e-16 1 3.8906839963873239e-16" />
+    <limit lower="-2.1744503611090216" upper="0.96314229248077177" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_mcp_output_joint" type="continuous">
+    <parent link="index_mcp_connecting_rod_1" />
+    <child link="index_mcp_link" />
+    <origin xyz="-0.014999999999997965 0.0038000000000000117 -0.026500000000001155" rpy="-1.5707963267948966 -4.4408920985006262e-16 0" />
+    <axis xyz="0 -8.3315792390987271e-16 1" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_mcp_connecting_rod_joint_2" type="revolute">
+    <parent link="index_mcp_link" />
+    <child link="index_mcp_connecting_rod_2" />
+    <origin xyz="-0.004242640687118826 0.0042426406871222729 -0.011499999999999946" rpy="1.570796326794897 0 0" />
+    <axis xyz="4.4408920985006262e-16 1 1.5815238913825927e-16" />
+    <limit lower="-2.3541944901928535" upper="0.78339816339693991" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_mcp_connecting_rod_joint_4" type="revolute">
+    <parent link="index_mcp_connecting_rod_2" />
+    <child link="index_mcp_connecting_rod_4" />
+    <origin xyz="2.7616797737550769e-15 -3.4694469519536142e-18 0.027" rpy="0 0 0" />
+    <axis xyz="4.4408920985006262e-16 1 1.5815238913825927e-16" />
+    <limit lower="-0.78339816339749768" upper="2.3541944901922958" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="index_pip_dip_motor_joint" type="continuous">
+    <parent link="index_mcp_link" />
+    <child link="index_pip_dip_drive_link" />
+    <origin xyz="0.033251116907963701 -0.00677711690796184 -0.010000000000000019" rpy="0 0 0" />
+    <axis xyz="-2.4568147779343127e-18 -1.0551889366929076e-15 1" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_pip_connecting_rod_joint_1" type="continuous">
+    <parent link="index_pip_dip_drive_link" />
+    <child link="index_pip_connecting_rod_1" />
+    <origin xyz="0.010978176725497432 -0.018776105447715883 0.0014999999999999827" rpy="1.570796326794897 0 3.3306690738754696e-16" />
+    <axis xyz="-2.456814777934664e-18 1 6.1109972684284491e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_pip_connecting_rod_joint_2" type="continuous">
+    <parent link="index_pip_connecting_rod_1" />
+    <child link="index_pip_connecting_rod_2" />
+    <origin xyz="0.0058667336341370405 -0.0049999999999998622 -0.020091383979445692" rpy="-1.4744246942623413e-16 2.2204460492503131e-16 -1.631478563472021e-18" />
+    <axis xyz="-6.5356135507044057e-18 1 9.7971515141207045e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_dip_connecting_rod_joint_1" type="revolute">
+    <parent link="index_pip_connecting_rod_2" />
+    <child link="index_dip_connecting_rod_1" />
+    <origin xyz="0.011974028212054727 0.0070000000000000461 0.010686484788498381" rpy="1.4744246942623411e-16 0 1.6314785634719101e-18" />
+    <axis xyz="-1.5368060890884623e-19 1 4.0295737247536217e-16" />
+    <limit lower="-0.83529499445450328" upper="2.3022976591352902" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_dip_connecting_rod_joint_2" type="continuous">
+    <parent link="index_dip_connecting_rod_1" />
+    <child link="index_dip_connecting_rod_2" />
+    <origin xyz="0.001272236257873363 -3.4694469519536138e-18 0.012785362810576947" rpy="0 0 5.061248552488086e-36" />
+    <axis xyz="-1.5368060890884623e-19 1 4.0295737247536217e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_pip_output_joint" type="revolute">
+    <parent link="index_pip_connecting_rod_1" />
+    <child link="index_pip_link" />
+    <origin xyz="0.0017988232745025743 -0.0029999999999999888 -0.029445105447715898" rpy="-1.5707963267948966 -4.4408920985006262e-16 0" />
+    <axis xyz="-4.904147773832864e-18 -1.2763630474061176e-15 1" />
+    <limit lower="-1.005987785635643" upper="2.1316048679541506" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="index_dip_output_joint" type="revolute">
+    <parent link="index_dip_connecting_rod_2" />
+    <child link="index_dip_link" />
+    <origin xyz="-0.001404174829562602 0.0064999999999998358 -0.028615569067345543" rpy="-1.5707963267948966 -4.4408920985006262e-16 0" />
+    <axis xyz="-2.2450737516371038e-16 -1.0544987076881872e-15 1" />
+    <limit lower="-0.5038084301679624" upper="2.6337842234218312" effort="1" velocity="10" />
+  </joint>
+  <!--FIXED MOUNT-->
+  <joint name="ring_mount_fixed_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="ring_mount_link" />
+    <origin xyz="0.064999999999999988 0.02399999999999999 0.0045000000000000014" rpy="0 0 0" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_mcp_connecting_rod_joint_3" type="revolute">
+    <parent link="ring_mount_link" />
+    <child link="ring_mcp_connecting_rod_3" />
+    <origin xyz="0 -0.0015000000000000013 0.0069999999999999984" rpy="0 0 -1.306352666265804e-48" />
+    <axis xyz="-2.2204460492502914e-16 1 4.8508847597941503e-16" />
+    <limit lower="-0.78339816339770496" upper="2.3541944901920884" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="ring_mcp_motor_joint" type="continuous">
+    <parent link="ring_mcp_connecting_rod_3" />
+    <child link="ring_mcp_drive_link" />
+    <origin xyz="0.0027389785597934924 0.0014999999999999875 0.03060633111874601" rpy="-1.5707963267948966 0 0" />
+    <axis xyz="2.2204460492502914e-16 1.051642365744213e-15 -1" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_mcp_connecting_rod_joint_6" type="continuous">
+    <parent link="ring_mcp_drive_link" />
+    <child link="ring_mcp_connecting_rod_6" />
+    <origin xyz="0.015002419668056211 -0.0055034356636817104 0.0059999999999999993" rpy="1.570796326794897 0 0" />
+    <axis xyz="2.2204460492503348e-16 1 4.8508847597941503e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_mcp_connecting_rod_joint_1" type="revolute">
+    <parent link="ring_mcp_connecting_rod_6" />
+    <child link="ring_mcp_connecting_rod_1" />
+    <origin xyz="0.016350484864187817 0.00020000000000000573 -0.011517883690391632" rpy="0 0 0" />
+    <axis xyz="2.2204460492503348e-16 1 4.8508827451702422e-16" />
+    <limit lower="-2.1744503611089048" upper="0.96314229248088867" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_mcp_output_joint" type="continuous">
+    <parent link="ring_mcp_connecting_rod_1" />
+    <child link="ring_mcp_link" />
+    <origin xyz="-0.014999999999999958 0.0038000000000000186 -0.026500000000000037" rpy="-1.5707963267948966 0 0" />
+    <axis xyz="-2.2204460492502914e-16 -1.0055053227179992e-15 1" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_mcp_connecting_rod_joint_2" type="revolute">
+    <parent link="ring_mcp_link" />
+    <child link="ring_mcp_connecting_rod_2" />
+    <origin xyz="-0.004242640687119395 0.0042426406871217369 -0.011499999999999967" rpy="1.570796326794897 0 0" />
+    <axis xyz="-6.6613381477509175e-16 1 6.5254004788313992e-16" />
+    <limit lower="-2.3541944901927989" upper="0.78339816339699453" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_mcp_connecting_rod_joint_4" type="revolute">
+    <parent link="ring_mcp_connecting_rod_2" />
+    <child link="ring_mcp_connecting_rod_4" />
+    <origin xyz="4.8433479449272454e-15 -1.3877787807814457e-17 0.027000000000000003" rpy="0 0 -1.306352666265804e-48" />
+    <axis xyz="-6.6613381477509175e-16 1 6.5254004788313992e-16" />
+    <limit lower="-0.78339816339756163" upper="2.3541944901922318" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="ring_pip_dip_motor_joint" type="continuous">
+    <parent link="ring_mcp_link" />
+    <child link="ring_pip_dip_drive_link" />
+    <origin xyz="0.033251116907962841 -0.0067771169079640465 -0.010000000000000012" rpy="0 0 0" />
+    <axis xyz="2.1693674893577825e-30 -9.2894074241753833e-16 1" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_pip_connecting_rod_joint_1" type="continuous">
+    <parent link="ring_pip_dip_drive_link" />
+    <child link="ring_pip_connecting_rod_1" />
+    <origin xyz="0.011121258192703071 -0.018691712500764478 0.0014999999999999827" rpy="1.570796326794897 0 0" />
+    <axis xyz="2.1693674893577825e-30 1 4.8485153256747571e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_pip_connecting_rod_joint_2" type="continuous">
+    <parent link="ring_pip_connecting_rod_1" />
+    <child link="ring_pip_connecting_rod_2" />
+    <origin xyz="0.0061308712354282147 -0.0049999999999999836 -0.020012363469566495" rpy="2.2204460492503101e-16 0 -2.2204460492503111e-16" />
+    <axis xyz="-6.6613381477509156e-16 1 3.74393688542853e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_dip_connecting_rod_joint_1" type="revolute">
+    <parent link="ring_pip_connecting_rod_2" />
+    <child link="ring_dip_connecting_rod_1" />
+    <origin xyz="0.012063827109517143 0.007000000000000008 0.010586150172356293" rpy="-2.2204460492503101e-16 0 2.2204460492503111e-16" />
+    <axis xyz="2.1693674893577825e-30 1 5.8222860496708503e-16" />
+    <limit lower="-0.79170017556609795" upper="2.3458924780236954" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_dip_connecting_rod_joint_2" type="continuous">
+    <parent link="ring_dip_connecting_rod_1" />
+    <child link="ring_dip_connecting_rod_2" />
+    <origin xyz="0.00070814744111000194 -6.9388939039072284e-18 0.012828975582468819" rpy="-1.110223024641306e-16 0 0" />
+    <axis xyz="2.1693674893577825e-30 1 6.9325090743121568e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_pip_output_joint" type="revolute">
+    <parent link="ring_pip_connecting_rod_1" />
+    <child link="ring_pip_link" />
+    <origin xyz="0.0021457418072969303 -0.0029999999999999784 -0.029360712500764469" rpy="-1.5707963267948966 0 0" />
+    <axis xyz="-4.4408920985006045e-16 -1.0427882991035628e-15 1" />
+    <limit lower="-1.028759181026687" upper="2.1088334725631066" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="ring_dip_output_joint" type="revolute">
+    <parent link="ring_dip_connecting_rod_2" />
+    <child link="ring_dip_link" />
+    <origin xyz="0.00032289602124155325 0.0065000000000000092 -0.028543474786023065" rpy="-1.5707963267948966 0 0" />
+    <axis xyz="-8.8817841970012306e-16 -1.0401932900739993e-15 1" />
+    <limit lower="-0.55116898794732583" upper="2.5864236656424677" effort="1" velocity="10" />
+  </joint>
+  <!--FIXED MOUNT-->
+  <joint name="pinky_mount_fixed_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="pinky_mount_link" />
+    <origin xyz="0.059000000000000011 0.04658919189857872 -0.001053657992645899" rpy="0 0 0" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_mcp_connecting_rod_joint_3" type="revolute">
+    <parent link="pinky_mount_link" />
+    <child link="pinky_mcp_connecting_rod_3" />
+    <origin xyz="0 -0.0015000000000000221 0.0069999999999999993" rpy="-5.6081246327517701e-20 0 -2.4651903288156619e-32" />
+    <axis xyz="-3.2162452993532742e-16 1.0000000000000002 1.0988367284192645e-15" />
+    <limit lower="-0.60886523819824923" upper="2.5287274153915442" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="pinky_mcp_motor_joint" type="continuous">
+    <parent link="pinky_mcp_connecting_rod_3" />
+    <child link="pinky_mcp_drive_link" />
+    <origin xyz="-0.0026173663028088295 0.0014999999999999458 0.030616970812578175" rpy="-1.5707963267948966 0 0" />
+    <axis xyz="3.2162452993532737e-16 1.6653345369377348e-15 -1.0000000000000002" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_mcp_connecting_rod_joint_6" type="continuous">
+    <parent link="pinky_mcp_drive_link" />
+    <child link="pinky_mcp_connecting_rod_6" />
+    <origin xyz="0.015002066138093434 -0.0055043992940467688 0.0059999999999999958" rpy="1.570796326794897 0 0" />
+    <axis xyz="-9.9579925010296086e-17 1.0000000000000002 1.3437660882487352e-15" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_mcp_connecting_rod_joint_1" type="revolute">
+    <parent link="pinky_mcp_connecting_rod_6" />
+    <child link="pinky_mcp_connecting_rod_1" />
+    <origin xyz="0.018101863946204083 0.00020000000000001267 -0.0085042649108313106" rpy="0 0 0" />
+    <axis xyz="-9.9579925010296086e-17 1.0000000000000002 1.3437658899023131e-15" />
+    <limit lower="-2.3489503808429766" upper="0.78864227274681686" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_mcp_output_joint" type="continuous">
+    <parent link="pinky_mcp_connecting_rod_1" />
+    <child link="pinky_mcp_link" />
+    <origin xyz="-0.015000000000007951 0.0038000000000000325 -0.026499999999995524" rpy="-1.5707963267948966 0 0" />
+    <axis xyz="-3.2162452993532737e-16 -1.8433103680837282e-15 1.0000000000000002" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_mcp_connecting_rod_joint_2" type="revolute">
+    <parent link="pinky_mcp_link" />
+    <child link="pinky_mcp_connecting_rod_2" />
+    <origin xyz="-0.0034414586181081425 0.0049149122657315102 -0.011499999999999995" rpy="1.570796326794897 0 0" />
+    <axis xyz="-9.9579925010296086e-17 1.0000000000000002 1.1263701834781751e-15" />
+    <limit lower="-2.5287274153914701" upper="0.60886523819832328" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_mcp_connecting_rod_joint_4" type="revolute">
+    <parent link="pinky_mcp_connecting_rod_2" />
+    <child link="pinky_mcp_connecting_rod_4" />
+    <origin xyz="4.8849813083506888e-15 -2.7757089809279755e-17 0.027000000000000017" rpy="0 0 -6.6132460633335508e-91" />
+    <axis xyz="-9.9579925010296086e-17 1.0000000000000002 1.1263701834781751e-15" />
+    <limit lower="-0.60886523819810989" upper="2.5287274153916837" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="pinky_pip_dip_motor_joint" type="continuous">
+    <parent link="pinky_mcp_link" />
+    <child link="pinky_pip_dip_drive_link" />
+    <origin xyz="0.024856436218533048 -0.0037518948041888765 -0.010000000000000018" rpy="0 0 0" />
+    <axis xyz="1.2246467991473525e-16 -1.8762746539509514e-15 1.0000000000000002" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_pip_connecting_rod_joint_1" type="continuous">
+    <parent link="pinky_pip_dip_drive_link" />
+    <child link="pinky_pip_connecting_rod_1" />
+    <origin xyz="0.016198767190833352 -0.014514215152641948 0.0014999999999999671" rpy="1.570796326794897 0 0" />
+    <axis xyz="1.2246467991473525e-16 1.0000000000000002 1.4321854441008886e-15" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_pip_connecting_rod_joint_2" type="continuous">
+    <parent link="pinky_pip_connecting_rod_1" />
+    <child link="pinky_pip_connecting_rod_2" />
+    <origin xyz="-0.0022347729585841108 -0.0049999999999999975 -0.020810767971563563" rpy="0 0 -4.7895943604852152e-48" />
+    <axis xyz="-3.2162452993532747e-16 1.0000000000000002 1.4966796479571334e-15" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_dip_connecting_rod_joint_1" type="revolute">
+    <parent link="pinky_pip_connecting_rod_2" />
+    <child link="pinky_dip_connecting_rod_1" />
+    <origin xyz="0.011855826886029347 0.0070000000000000132 0.010818589041474282" rpy="-5.4738221262688167e-48 2.2204460492503131e-16 -4.930380657631326e-32" />
+    <axis xyz="1.4547323094649224e-15 1.0000000000000002 7.2099241646732336e-16" />
+    <limit lower="-1.1434271745457973" upper="1.994165479043996" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_dip_connecting_rod_joint_2" type="continuous">
+    <parent link="pinky_dip_connecting_rod_1" />
+    <child link="pinky_dip_connecting_rod_2" />
+    <origin xyz="0.0048676875310866823 -6.9388939039072284e-18 0.011890740321512154" rpy="0 0 0" />
+    <axis xyz="1.4547323094649224e-15 1.0000000000000002 7.2099241646732336e-16" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_pip_output_joint" type="revolute">
+    <parent link="pinky_pip_connecting_rod_1" />
+    <child link="pinky_pip_link" />
+    <origin xyz="-0.0096317671908471569 -0.0029999999999999541 -0.027823215152628936" rpy="-1.5707963267948966 0 0" />
+    <axis xyz="-3.2162452993532747e-16 -1.9393394612323504e-15 1.0000000000000002" />
+    <limit lower="-0.53547295363567571" upper="2.6021196999541178" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="pinky_dip_output_joint" type="revolute">
+    <parent link="pinky_dip_connecting_rod_2" />
+    <child link="pinky_dip_link" />
+    <origin xyz="-0.003770508649379192 0.0055000000000000604 -0.028211776544051784" rpy="-1.5707963267948966 0 0" />
+    <axis xyz="-7.6571373978539068e-16 -1.645878177118991e-15 1.0000000000000002" />
+    <limit lower="-0.72261598686795114" upper="2.4149766667218424" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="thumb_cmc_flex_motor_joint" type="continuous">
+    <parent link="base_link" />
+    <child link="thumb_cmc_flex_link" />
+    <origin xyz="-0.0080000000000000002 -0.029249999999999991 0.0025999999999999999" rpy="0 0 0" />
+    <axis xyz="1.0877048587575128e-31 -1.2246467991473532e-16 1" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="thumb_cmc_abd_motor_joint" type="continuous">
+    <parent link="thumb_cmc_flex_link" />
+    <child link="thumb_cmc_abd_link" />
+    <origin xyz="-0.02159569434664255 -0.013560087967501903 -0.031099999999999829" rpy="1.5707963267948972 0 -1.047197551196599" />
+    <axis xyz="0.037079744474002869 9.8768661869885548e-16 0.99931230981597674" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="thumb_mcp_connecting_rod_joint_3" type="revolute">
+    <parent link="thumb_cmc_abd_link" />
+    <child link="thumb_mcp_connecting_rod_3" />
+    <origin xyz="0.03785159497799867 -0.011246614969346848 -0.015914471695686664" rpy="-1.5707963267948952 1.0471975511966001 1.5543122344752192e-15" />
+    <axis xyz="0.13018026119474166 -0.20732410714925539 0.96957197473422885" />
+    <limit lower="-0.69613170079792419" upper="2.4414609527918691" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="thumb_mcp_motor_joint" type="continuous">
+    <parent link="thumb_mcp_connecting_rod_3" />
+    <child link="thumb_mcp_drive_link" />
+    <origin xyz="-0.025796987418614529 -0.016701587697508315 0.0014394153700805544" rpy="0.30963048516778441 0.16383138419359411 0.052131526771879821" />
+    <axis xyz="0.04053263592552947 -0.09374541221845531 -0.99477077918127432" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="thumb_mcp_connecting_rod_joint_6" type="continuous">
+    <parent link="thumb_mcp_drive_link" />
+    <child link="thumb_mcp_connecting_rod_6" />
+    <origin xyz="0.0026005533004415846 -0.015081851443773352 0.007558788233540949" rpy="-0.30534955463875874 -0.17185475131873718 9.4368957093138306e-16" />
+    <axis xyz="0.13018026119474205 -0.20732410714925567 0.96957197473422863" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="thumb_mcp_connecting_rod_joint_1" type="revolute">
+    <parent link="thumb_mcp_connecting_rod_6" />
+    <child link="thumb_mcp_connecting_rod_1" />
+    <origin xyz="0.017452182140136198 -0.0088963827484035644 -0.0040392712884108929" rpy="0 0 0" />
+    <axis xyz="0.13018026119474205 -0.2073241071492557 0.96957197473422863" />
+    <limit lower="-2.2617024224619198" upper="0.87589023112787356" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="thumb_mcp_output_joint" type="continuous">
+    <parent link="thumb_mcp_connecting_rod_1" />
+    <child link="thumb_mcp_link" />
+    <origin xyz="0.015203456802843244 0.025620836288529264 0.0073564698817069072" rpy="0.30963048516778457 0.16383138419359389 0.052131526771880377" />
+    <axis xyz="-0.040532635925529234 0.093745412218455559 0.99477077918127421" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="thumb_mcp_connecting_rod_joint_2" type="revolute">
+    <parent link="thumb_mcp_link" />
+    <child link="thumb_mcp_connecting_rod_2" />
+    <origin xyz="0.0024766010411945774 0.0045571971521381812 -0.011889003381247803" rpy="-0.30534955463875874 -0.17185475131873718 9.4368957093138306e-16" />
+    <axis xyz="0.13018026119474183 -0.20732410714925581 0.96957197473422863" />
+    <limit lower="-2.4414609527925135" upper="0.69613170079728004" effort="1" velocity="10" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="thumb_mcp_connecting_rod_joint_4" type="revolute">
+    <parent link="thumb_mcp_connecting_rod_2" />
+    <child link="thumb_mcp_connecting_rod_4" />
+    <origin xyz="-0.022866029308207726 -0.014357740200887632 -9.1988154036654066e-16" rpy="1.1688263070195447e-16 0 5.2010497778276246e-16" />
+    <axis xyz="0.13018026119474188 -0.20732410714925578 0.96957197473422874" />
+    <limit lower="-0.69613170079780817" upper="2.4414609527919851" effort="1" velocity="10" />
+  </joint>
+  <!--ACTIVE MOTOR: command input-->
+  <joint name="thumb_ip_motor_joint" type="continuous">
+    <parent link="thumb_mcp_link" />
+    <child link="thumb_ip_drive_link" />
+    <origin xyz="0.0094231379310409681 -0.026628910499374808 -0.015703836015499045" rpy="0 0 0" />
+    <axis xyz="-0.040532635925529692 0.093745412218453769 0.99477077918127443" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="thumb_ip_connecting_rod_joint_1" type="continuous">
+    <parent link="thumb_ip_drive_link" />
+    <child link="thumb_ip_connecting_rod_1" />
+    <origin xyz="-0.0093932504677931104 -0.018812099420532438 0.011442650962136591" rpy="-0.30534955463875874 -0.17185475131873718 9.4368957093138306e-16" />
+    <axis xyz="0.1301802611947423 -0.207324107149257 0.96957197473422829" />
+  </joint>
+  <!--PASSIVE: closure solver output; do not command independently-->
+  <joint name="thumb_ip_output_joint" type="revolute">
+    <parent link="thumb_ip_connecting_rod_1" />
+    <child link="thumb_ip_link" />
+    <origin xyz="0.025697406052859969 0.012950806512858499 0.010148518750090346" rpy="0.30963048516778457 0.16383138419359389 0.052131526771880377" />
+    <axis xyz="-0.04053263592553015 0.093745412218453492 0.99477077918127443" />
+    <limit lower="-0.95310749736870015" upper="2.1844851562210934" effort="1" velocity="10" />
+  </joint>
+</robot>

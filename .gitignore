@@ -1,0 +1,11 @@
+.pixi/
+.cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+logs/
+MUJOCO_LOG.TXT
+recordings/
+build/
+src/wujihand2_force_glove/_ve33_geometry*.so
