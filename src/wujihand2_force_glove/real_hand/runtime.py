@@ -110,6 +110,27 @@ def _identity_json(identity) -> dict[str, object]:
     return asdict(identity) if is_dataclass(identity) else dict(identity)
 
 
+def _quiet_encos_factory():
+    """压低连接成功提示，但不隐藏手套警告和错误。"""
+    from encos_hand import EncosHand
+
+    return EncosHand(announce_connection=False)
+
+
+def _format_torque_line(tick: PairTick, bindings) -> str:
+    """输出本周期确认后的SDK原始电机轴名义力矩，不把命令称作实测。"""
+    feedback = tick.force_feedback
+    if feedback is None or feedback.model_torque_nm is None:
+        raise RuntimeError("力矩简洁输出需要名义Nm反馈")
+    values = feedback.model_torque_nm
+    axes = " ".join(
+        f"J{mid}={values[index] * scale:+.3f}"
+        for mid, (index, scale) in enumerate(bindings, 1)
+    )
+    delivery = "SDK已提交" if tick.executed else "只读预览"
+    return f"手套前馈[Nm,{delivery},{feedback.projection_status}/{feedback.contact_state}] {axes}"
+
+
 class PairRuntime:
     """位置主导端唯一的配对控制器；执行权必须由调用方显式授予。
 
@@ -520,6 +541,8 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--transition", type=float, default=0.5, help="五次平滑过渡秒数")
             command.add_argument("--curves-port", type=int, default=None,
                                  help="旁路发送曲线到本机UDP端口；不启动UI，不改变控制目标")
+            command.add_argument("--torque-only", action="store_true",
+                                 help="只打印12轴名义力矩和反馈状态；保留故障警告")
             command.add_argument("--contact-feedback-config", type=Path, default=None,
                                  help="受阻估计与软件虚拟弹簧阻尼参数；须同时提供名义Nm限额配置")
             feedback_options = command.add_mutually_exclusive_group()
@@ -567,6 +590,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("力反馈配置仅用于 glove-to-hand2 人手接管")
         if args.contact_feedback_config is not None and args.feedback_linear_config is None:
             parser.error("--contact-feedback-config 必须同时指定 --feedback-linear-config")
+        if args.torque_only and args.feedback_linear_config is None:
+            parser.error("--torque-only 需要 --feedback-linear-config 名义Nm模式")
     feedback_config = None
     contact_config = None
     if args.command == "follow":
@@ -586,6 +611,7 @@ def main(argv: list[str] | None = None) -> int:
 
     glove = EncosGloveHardwareDriver(
         hand=args.glove_hand, asset_root=args.assets, config_path=args.mapping,
+        hand_factory=_quiet_encos_factory if args.command == "follow" and args.torque_only else None,
         haptic_kp=45.0, haptic_kd=0.5,
         torque_constant_nm_per_a=(
             feedback_config.glove_torque_constants_by_id
@@ -644,6 +670,10 @@ def main(argv: list[str] | None = None) -> int:
             hand=args.hand, glove_hand=args.glove_hand,
             asset_root=args.assets, config_path=args.config,
         )
+        torque_bindings = None
+        if args.torque_only:
+            from .curve_telemetry import _motor_axis_bindings
+            torque_bindings = _motor_axis_bindings(bridge.forward.landmarks.model, glove.motors)
         if args.curves_port is not None:
             from .curve_telemetry import CurvePublisher
             curve_publisher = CurvePublisher(
@@ -665,37 +695,44 @@ def main(argv: list[str] | None = None) -> int:
             transition_s=args.transition, force_feedback=feedback,
         )
         runtime.connect(serial_number=args.wuji_serial)
-        print(json.dumps(runtime.inspect(), ensure_ascii=False, indent=2))
-        print(
-            f"模式={args.mode}；" + (
-                "已明确 --execute，Wuji位置跟随＋手套力控反射。"
-                if args.execute and feedback is not None else
-                "已明确 --execute，只有位置跟随侧输出。" if args.execute else
-                "未提供 --execute：双方只读，仅计算，不使能/回零/发送。"
-            )
-        )
-        if args.mode == FollowMode.GLOVE_TO_HAND2.value:
-            if feedback is None:
-                print("控制量：Wuji20语义关节rad位置；MotorHand只读，绝不拉人手。")
-            else:
-                if feedback.output_is_torque:
-                    if feedback.contact_config is not None:
-                        print("受阻估计：最终位置跟踪误差＋实测电流＋速度持续判据→单向软件弹簧阻尼→既有几何传动→手套名义Nm；不是独立接触力测量。")
-                        print("软件虚拟K/D与SDK参数独立；SDK仍kp=kd=0。阈值与虚拟刚阻尼为初始估计，不是实物标定。")
-                    else:
-                        print("近似反馈：Wuji实测A/满量程A→完整几何投影→手套允许的名义Nm；不计算假Wuji Nm，不是净接触力。")
-                    print("手套名义输出上限raw Nm=" + str(feedback_config.glove_max_output_torque_nm.tolist()))
-                    print("输入归一化不修改Wuji电流限值；两侧kp/kd独立，手套接管MIT0/0，保留协议量化裕量。")
-                else:
-                    print("控制量：手套实测姿态→Wuji位置；Wuji实测电流→标定执行器反作用力矩→手套MIT纯力矩(kp0/kd0)，不追逆解位置。")
-                if args.execute:
-                    print("首次手套输出先servo回零：5rpm，J1=1.5A/其余1A，容差0.15rad；随后连续名义目标从0渐入（零附近有协议量化偏差）。")
-                print("姿态超出局部Jac范围时只暂停力反射并后台刷新，位置跟随继续；恢复时重新渐入，终端反馈状态非active时不代表力反馈生效。")
-        else:
-            print("控制量：共享任务逆解→模型m12五次过渡→CAD FK→MIT位置(kp45/kd0.5)；外部仍为真实指节q12 rad，无力矩前馈；Wuji只读，不发hold。")
+        inspection = runtime.inspect()
+        if args.torque_only:
             if args.execute:
-                print("首次MotorHand输出将安全回零：servo5rpm，J1=1.5A/其余1A，容差0.15rad。")
-        print("只读预热真实任务求解器；预热不使能/不回零/不发送，实时周期仍使用新反馈与原始100ms期限。")
+                print("只读预热中；完成后先回零手套并使能两侧，Ctrl+C停止。", file=sys.stderr, flush=True)
+            else:
+                print("只读预热中；仅计算，不发送控制目标。", file=sys.stderr, flush=True)
+        else:
+            print(json.dumps(inspection, ensure_ascii=False, indent=2))
+            print(
+                f"模式={args.mode}；" + (
+                    "已明确 --execute，Wuji位置跟随＋手套力控反射。"
+                    if args.execute and feedback is not None else
+                    "已明确 --execute，只有位置跟随侧输出。" if args.execute else
+                    "未提供 --execute：双方只读，仅计算，不使能/回零/发送。"
+                )
+            )
+            if args.mode == FollowMode.GLOVE_TO_HAND2.value:
+                if feedback is None:
+                    print("控制量：Wuji20语义关节rad位置；MotorHand只读，绝不拉人手。")
+                else:
+                    if feedback.output_is_torque:
+                        if feedback.contact_config is not None:
+                            print("受阻估计：最终位置误差＋实测电流＋速度持续判据→电流连续加权的虚拟弹簧及限速非线性阻尼→既有几何传动→手套名义Nm；不是独立接触力测量。")
+                            print("软件虚拟K/D与SDK参数独立；SDK仍kp=kd=0。阈值与虚拟刚阻尼为初始估计，不是实物标定。")
+                        else:
+                            print("近似反馈：Wuji实测A/满量程A→完整几何投影→手套允许的名义Nm；不计算假Wuji Nm，不是净接触力。")
+                        print("手套名义输出上限raw Nm=" + str(feedback_config.glove_max_output_torque_nm.tolist()))
+                        print("输入归一化不修改Wuji电流限值；两侧kp/kd独立，手套接管MIT0/0，保留协议量化裕量。")
+                    else:
+                        print("控制量：手套实测姿态→Wuji位置；Wuji实测电流→标定执行器反作用力矩→手套MIT纯力矩(kp0/kd0)，不追逆解位置。")
+                    if args.execute:
+                        print("首次手套输出先servo回零：5rpm，J1=1.5A/其余1A，容差0.15rad；随后连续名义目标从0渐入（零附近有协议量化偏差）。")
+                    print("姿态超出局部Jac范围时只暂停力反射并后台刷新，位置跟随继续；恢复时增力受斜率限幅，终端反馈状态非active时不代表力反馈生效。")
+            else:
+                print("控制量：共享任务逆解→模型m12五次过渡→CAD FK→MIT位置(kp45/kd0.5)；外部仍为真实指节q12 rad，无力矩前馈；Wuji只读，不发hold。")
+                if args.execute:
+                    print("首次MotorHand输出将安全回零：servo5rpm，J1=1.5A/其余1A，容差0.15rad。")
+            print("只读预热真实任务求解器；预热不使能/不回零/不发送，实时周期仍使用新反馈与原始100ms期限。")
         runtime.prepare()
         runtime.start()
         began = time.monotonic()
@@ -706,29 +743,32 @@ def main(argv: list[str] | None = None) -> int:
             if curve_publisher is not None:
                 curve_publisher.publish(tick)
             if cycle >= next_report:
-                print(json.dumps({
-                    "模式": tick.mode.value, "真实执行": tick.executed,
-                    "跟随端目标rad": tick.output_positions_rad.tolist(),
-                    "原始命令期限ns": tick.deadline_ns,
-                    **({} if tick.force_feedback is None else {
-                        "反馈模式": tick.force_feedback.mapping_mode,
-                        "反馈状态": tick.force_feedback.projection_status,
-                        "目标已发送": tick.executed,
-                        "反馈参数来源": tick.force_feedback.source_id,
-                        "反馈Jac年龄ns": tick.force_feedback.jacobian_age_ns,
-                        "受阻估计状态": tick.force_feedback.contact_state,
-                        **({} if tick.force_feedback.contact_active_mask is None else {
-                            "估计受阻Wuji语义轴_1至20": (np.flatnonzero(tick.force_feedback.contact_active_mask) + 1).tolist(),
-                            "软件虚拟手关节反作用Nm_非实测": tick.force_feedback.virtual_hand_torque_nm.tolist(),
+                if args.torque_only:
+                    print(_format_torque_line(tick, torque_bindings), flush=True)
+                else:
+                    print(json.dumps({
+                        "模式": tick.mode.value, "真实执行": tick.executed,
+                        "跟随端目标rad": tick.output_positions_rad.tolist(),
+                        "原始命令期限ns": tick.deadline_ns,
+                        **({} if tick.force_feedback is None else {
+                            "反馈模式": tick.force_feedback.mapping_mode,
+                            "反馈状态": tick.force_feedback.projection_status,
+                            "目标已发送": tick.executed,
+                            "反馈参数来源": tick.force_feedback.source_id,
+                            "反馈Jac年龄ns": tick.force_feedback.jacobian_age_ns,
+                            "受阻估计状态": tick.force_feedback.contact_state,
+                            **({} if tick.force_feedback.contact_active_mask is None else {
+                                "估计受阻Wuji语义轴_1至20": (np.flatnonzero(tick.force_feedback.contact_active_mask) + 1).tolist(),
+                                "软件虚拟手关节反作用Nm_非实测": tick.force_feedback.virtual_hand_torque_nm.tolist(),
+                            }),
+                            **({
+                                "手套名义目标Nm": tick.force_feedback.model_torque_nm,
+                                "Wuji电流负载占比": tick.force_feedback.wuji_load_fraction.tolist(),
+                            } if tick.force_feedback.model_torque_nm is not None else {
+                                "力反馈电流A": tick.force_feedback.model_current_a,
+                            }),
                         }),
-                        **({
-                            "手套名义目标Nm": tick.force_feedback.model_torque_nm,
-                            "Wuji电流负载占比": tick.force_feedback.wuji_load_fraction.tolist(),
-                        } if tick.force_feedback.model_torque_nm is not None else {
-                            "力反馈电流A": tick.force_feedback.model_current_a,
-                        }),
-                    }),
-                }, ensure_ascii=False))
+                    }, ensure_ascii=False))
                 next_report = cycle + 1.0
             time.sleep(max(0.0, 1.0 / args.rate - (time.monotonic() - cycle)))
         return 0

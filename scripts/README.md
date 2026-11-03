@@ -12,6 +12,7 @@ pixi run mujoco-viewer
 `mujoco-force-feedback` 加载 `vendor/wuji-retargeting` 子模块中的官方 Hand2 Beta1
 MJCF，使用官方控制指南中的 `kp=3.0`、`kd=0.05`、`effort_limit=1.5 A` 示例参数。
 其中电流—力矩常数和外力施加方式是仿真假设，不是真机标定。
+该入口不运行`ContactImpedance`接触控制器，不能用于验证当前接管力反馈。
 
 `mujoco-viewer` 同时加载官方 Hand2 和真实 vE3.3 闭链 CAD/MJCF；两套模型在 MuJoCo 中按腕部
 基座重合显示。vE3.3 先使用资产内固定的 `canonical_to_model` 换回 canonical，再应用当前安装

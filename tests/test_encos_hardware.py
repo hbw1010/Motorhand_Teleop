@@ -859,14 +859,16 @@ def test_nominal_torque_enable_preserves_home_and_independent_position_gains():
 
 
 @pytest.mark.parametrize("polarity", [-1.0, 1.0])
-def test_nominal_torque_can_quantization_stays_within_raw_software_limits(polarity):
+@pytest.mark.parametrize("full_scale", [False, True])
+def test_nominal_torque_can_quantization_stays_within_raw_software_limits(polarity, full_scale):
     backend = FakeEncosHand()
     mapping = _mapping()
     mapping[1], mapping[12] = mapping[12], mapping[1]
     for mid in mapping:
         mapping[mid] = {**mapping[mid], "sign": -1.0 if mid % 2 else 1.0,
                         "scale": -2.0 if mid % 3 else 0.5}
-    raw_caps = {mid: 0.01 + mid * 0.0001 for mid in range(1, 13)}
+    raw_caps = (dict.fromkeys(range(1, 13), 10.0) if full_scale else
+                {mid: 0.01 + mid * 0.0001 for mid in range(1, 13)})
     driver = EncosGloveHardwareDriver(
         mapping=mapping, hand_factory=lambda: backend, force_torque_limits_nm=raw_caps,
     )
@@ -884,7 +886,9 @@ def test_nominal_torque_can_quantization_stays_within_raw_software_limits(polari
         name = driver._glove_model().joint_motor_names[config["joint"]]
         index = driver.motor_names.index(name)
         assert cmd["torque_nm"] == pytest.approx(values[index] * config["sign"] * config["scale"])
-        assert abs(_decoded_nominal_torque(cmd)) <= raw_caps[mid]
+        decoded = _decoded_nominal_torque(cmd)
+        assert abs(decoded) <= raw_caps[mid]
+        assert abs(decoded - cmd["torque_nm"]) <= 10.0 / 4095.0 + 1e-12
         assert cmd["deadline_ns"] == 10**18
     driver.close()
 

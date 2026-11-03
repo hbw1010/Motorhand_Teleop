@@ -623,7 +623,14 @@ class ForceFeedbackController:
         output = np.clip(output, -maximum, maximum)
         if status == "active" and (virtual_torque is None or np.any(virtual_torque != 0)):
             delta = self._max_slew * ((now_ns - self._history_ns) / 1e9)
-            output = np.clip(output, self._history - delta, self._history + delta)
+            if self._contact is None:
+                output = np.clip(output, self._history - delta, self._history + delta)
+            else:
+                # 受阻增强按斜率渐入；减力立即生效，换向先归零再按斜率建立。
+                # 多指同时接触时不能因另一指仍有力而继续保留已张开手指的旧力。
+                reversal = self._history * output < 0.0
+                magnitude = np.minimum(np.abs(output), np.abs(self._history) + delta)
+                output = np.where(reversal, 0.0, np.copysign(magnitude, output))
         # 无效局部导数期间直接归零，不让斜率历史继续输出旧姿态的反作用力。
         if virtual_torque is not None and not np.any(virtual_torque != 0):
             output.fill(0)

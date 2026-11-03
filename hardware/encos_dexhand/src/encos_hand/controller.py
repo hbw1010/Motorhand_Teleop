@@ -23,9 +23,11 @@ def discover_usb_serial_ports() -> tuple[str, ...]:
 
 
 class EncosHand:
-    def __init__(self, port_map: Optional[Dict[int, str]] = None, config_path: Optional[str] = None):
+    def __init__(self, port_map: Optional[Dict[int, str]] = None, config_path: Optional[str] = None,
+                 *, announce_connection: bool = True):
         self.port_map = port_map
         self.config_path = Path(config_path) if config_path else Path(__file__).resolve().parents[2] / "configs" / "joint_calibration.json"
+        self.announce_connection = announce_connection
         self.calibrations = self._load_calibrations()
         
         self.workers: Dict[int, HeadlessChannelWorker] = {}
@@ -66,7 +68,8 @@ class EncosHand:
             if ch_id in self.port_map and self.port_map[ch_id] in all_ports:
                 w.conn_event.wait(timeout=3.0)
                 if w.is_connected:
-                    print(f"✅ [CAN-{ch_id}] 成功挂载 {w.port} @ 1Mbps")
+                    if self.announce_connection:
+                        print(f"✅ [CAN-{ch_id}] 成功挂载 {w.port} @ 1Mbps")
                 else:
                     print(f"❌ [CAN-{ch_id}] 无法挂载 {w.port}: {w.error_msg}")
 

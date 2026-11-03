@@ -83,6 +83,26 @@ def test_udp_consumer_receives_raw_axis_sign_scale_without_faking_missing_measur
         assert sample["glove_projected_torque_nm"] == [None] * 12
 
 
+def test_console_reports_confirmed_nominal_torque_in_raw_motor_order():
+    import re
+
+    from wujihand2_force_glove.real_hand.curve_telemetry import _motor_axis_bindings
+    from wujihand2_force_glove.real_hand.runtime import _format_torque_line
+
+    model, motors, _, tick = _source("Nm")
+    confirmed = tuple((index + 1) / 10 for index in range(12))
+    tick = replace(tick, executed=True,
+                   force_feedback=replace(tick.force_feedback, model_torque_nm=confirmed))
+    bindings = _motor_axis_bindings(model, motors)
+    line = _format_torque_line(tick, bindings)
+    axes = [(int(mid), float(value)) for mid, value in re.findall(r"J(\d+)=([+-]\d+\.\d+)", line)]
+    assert [mid for mid, _ in axes] == list(range(1, 13))
+    expected = [confirmed[11 - index] * (-1 if index % 2 else 1) * 1.5 for index in range(12)]
+    np.testing.assert_allclose([value for _, value in axes], expected, atol=0.0005)
+    assert "SDK已提交" in line
+    assert "只读预览" in _format_torque_line(replace(tick, executed=False), bindings)
+
+
 def test_curve_socket_failure_does_not_raise_into_control_or_retry_output():
     model, motors, _, tick = _source("Nm")
     publisher = CurvePublisher(8765, glove_model=model, motors=motors,

@@ -57,7 +57,7 @@ plotjuggler = "bash scripts/ros_plotjuggler.sh plot"
 plotjuggler-pinky = "bash scripts/ros_plotjuggler.sh plot --nosplash --buffer_size 20 --layout config/plotjuggler-pinky-right.xml"
 plotjuggler-bridge = "bash scripts/ros_plotjuggler.sh bridge"
 plotjuggler-demo = "bash scripts/ros_plotjuggler.sh demo"
-wuji-force-contact = "python -m wujihand2_force_glove.real_hand follow --mode glove-to-hand2 --wuji-serial WH2KA01260814006 --hand right --glove-hand right --approved-firmware 2.2.3 --rate 50 --feedback-linear-config config/feedback/max-torque-linear-right.json --contact-feedback-config config/feedback/contact-impedance-right.json --execute"
+wuji-force-contact = "RUST_LOG=warn python -m wujihand2_force_glove.real_hand follow --mode glove-to-hand2 --wuji-serial WH2KA01260814006 --hand right --glove-hand right --approved-firmware 2.2.3 --rate 50 --feedback-linear-config config/feedback/max-torque-linear-right.json --contact-feedback-config config/feedback/contact-impedance-right.json --execute --torque-only"
 wuji-discover = "python -m wujihand2_force_glove.real_hand discover"
 
 [feature.hardware.pypi-dependencies]

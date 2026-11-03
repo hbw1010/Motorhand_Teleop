@@ -28,20 +28,27 @@ def _values(values, count):
     return [None] * count if values is None else [_number(value) for value in values]
 
 
+def _motor_axis_bindings(glove_model, motors):
+    """模型电机轴到按ID排序的SDK原始轴，供终端与曲线共用。"""
+    if set(motors) != set(range(1, 13)):
+        raise ValueError("曲线通道必须包含12个手套原始轴")
+    names = tuple(glove_model.motor_names)
+    return tuple(
+        (names.index(glove_model.joint_motor_names[motors[mid].joint]),
+         float(motors[mid].sign * motors[mid].scale))
+        for mid in range(1, 13)
+    )
+
+
 class CurvePublisher:
     """CLI在周期发送完成后旁路发布；丢曲线包不改变硬件输出或重发命令。"""
 
     def __init__(self, port, *, glove_model, motors, wuji_joint_names, clock_ns=None):
         if type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("曲线端口必须为1至65535的整数")
-        names = tuple(glove_model.motor_names)
-        if set(motors) != set(range(1, 13)) or len(wuji_joint_names) != 20:
-            raise ValueError("曲线通道必须包含20个Wuji语义轴及12个手套原始轴")
-        self._bindings = tuple(
-            (names.index(glove_model.joint_motor_names[motors[mid].joint]),
-             float(motors[mid].sign * motors[mid].scale))
-            for mid in range(1, 13)
-        )
+        if len(wuji_joint_names) != 20:
+            raise ValueError("曲线通道必须包含20个Wuji语义轴")
+        self._bindings = _motor_axis_bindings(glove_model, motors)
         self._wuji_names = list(wuji_joint_names)
         self._glove_names = [motors[mid].joint for mid in range(1, 13)]
         self._session_id = uuid.uuid4().hex

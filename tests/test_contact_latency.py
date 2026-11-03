@@ -25,7 +25,7 @@ def complete_geometry():
     # 每份矩阵均为完整CAD扰动、官方Retarget中心差分，不是目标回显或手写映射。
     bridge = create_retargeter(project_root=ROOT, estimate_jacobian=True)
     snapshots = []
-    for amount in (0.0, 0.20):
+    for amount in (0.0, 0.20, 0.35):
         joints = human_joints(amount)
         q = np.array([joints[name] for name in GLOVE_JOINTS])
         value = bridge.forward.local_jacobian(joints, step_rad=0.01)
@@ -198,6 +198,31 @@ def test_blocked_operator_feels_reaction_on_first_fresh_geometry_cycle(consumer_
         assert all(deadline - target_tick.hand2_state.received_ns == 100_000_000
                    for target_tick, (_, deadline) in zip(
                        [first, *following], consumer.hand.commands[-5:]))
+
+
+def test_one_finger_releases_without_retaining_old_force_while_another_is_blocked(consumer_factory):
+    with consumer_factory(reflection_gain=6000.0, slew=1.0, dwell_s=0.04) as consumer:
+        set_human(consumer.glove, 0.35)
+        consumer.hand.effort[:] = 0.8
+        before = consumer.steps(32)[-1].force_feedback
+        names = list(consumer.glove.model.motor_names)
+        index_motors = [
+            names.index(consumer.glove.model.joint_motor_names[name])
+            for name in ("index_mcp_flex", "index_pip")
+        ]
+        assert np.max(np.abs(np.asarray(before.model_torque_nm)[index_motors])) > 0.1
+        assert np.any(before.virtual_hand_torque_nm[10:12])
+
+        consumer.geometry.freeze()
+        joints = human_joints(0.35)
+        joints["index_pip"] = 0.33
+        _, motors = consumer.glove.model.evaluate(joints)
+        consumer.glove.plant.motors = dict(motors)
+        after = consumer.steps()[0].force_feedback
+
+        assert not after.virtual_hand_torque_nm[6:8].any()
+        assert np.any(after.virtual_hand_torque_nm[10:12])
+        assert np.max(np.abs(np.asarray(after.model_torque_nm)[index_motors])) < 0.01
 
 
 def test_obstruction_confirmed_during_geometry_gap_is_felt_without_second_dwell(consumer_factory):

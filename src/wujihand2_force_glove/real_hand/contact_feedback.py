@@ -78,6 +78,9 @@ class ContactFeedbackConfig:
     current_filter_hz: float = 5.0
     output_filter_hz: float = 8.0
     max_sample_gap_s: float = 0.1
+    load_weight_scale_a: float = 0.5
+    opening_speed_deadband_rad_s: float = 0.02
+    relative_velocity_limit_rad_s: float = 2.0
     reflection_gain: float = 1.0
 
     def __post_init__(self) -> None:
@@ -101,8 +104,11 @@ class ContactFeedbackConfig:
         if np.any(self.damping_nm_s_per_rad < 0):
             raise ValueError("软件虚拟阻尼不能为负")
         for name in ("reflection_gain", "dwell_s", "release_dwell_s", "current_filter_hz",
-                     "output_filter_hz", "max_sample_gap_s"):
+                     "output_filter_hz", "max_sample_gap_s", "load_weight_scale_a",
+                     "opening_speed_deadband_rad_s", "relative_velocity_limit_rad_s"):
             object.__setattr__(self, name, _positive(getattr(self, name), name))
+        if self.opening_speed_deadband_rad_s >= self.relative_velocity_limit_rad_s:
+            raise ValueError("张开撤力速度死区必须小于相对速度限幅")
 
     @classmethod
     def from_json(cls, path: str | Path) -> ContactFeedbackConfig:
@@ -297,14 +303,37 @@ class ContactImpedance:
                 self._candidate_since_ns[axis] = None
                 self._candidate_direction[axis] = 0
             if not new_frame:
+                if (self._last_target_rad is not None
+                        and self._direction[axis] * (target[axis] - self._last_target_rad[axis]) < 0):
+                    # 同源帧无法估算速度，但目标已经回开时不能保留旧反力。
+                    self._output_nm[axis] = 0.0
                 continue
             n = self._direction[axis]
             penetration_rad = max(n * error_rad[axis] - config.error_off_rad[axis], 0.0)
-            closing_speed_rad_s = 0.0
+            relative_speed_rad_s = 0.0
             if target_velocity is not None and measured_velocity is not None:
-                closing_speed_rad_s = max(n * (target_velocity[axis] - measured_velocity[axis]), 0.0)
-            requested_nm = -n * (config.stiffness_nm_per_rad[axis] * penetration_rad
-                                 + config.damping_nm_s_per_rad[axis] * closing_speed_rad_s)
+                relative_speed_rad_s = min(
+                    max(n * (target_velocity[axis] - measured_velocity[axis]),
+                        -config.relative_velocity_limit_rad_s),
+                    config.relative_velocity_limit_rad_s,
+                )
+            if relative_speed_rad_s < -config.opening_speed_deadband_rad_s:
+                # 张开时立即清掉低通历史，防止旧弹簧力继续把手拉回。
+                self._output_nm[axis] = 0.0
+                continue
+            # Franka参考控制器使用外力矩连续加权；Wuji只有电流，因此这里只用
+            # 无量纲负载权重调制虚拟弹簧，绝不将A直接解释为接触Nm。
+            load_ratio = min(float(self._filtered_current_a[axis] / config.load_weight_scale_a), 20.0)
+            speed_ratio = min(float(abs(relative_speed_rad_s) / config.stalled_speed_rad_s[axis]), 20.0)
+            load_weight = -math.expm1(-(load_ratio * load_ratio))
+            damping_weight = (0.6 / (1.0 + math.exp(-load_ratio))
+                              + 0.4 / (1.0 + math.exp(-speed_ratio)))
+            # 张开时相对速度为负，阻尼先抵消弹簧；不能反向变成继续闭合的推力。
+            requested_nm = -n * max(
+                load_weight * config.stiffness_nm_per_rad[axis] * penetration_rad
+                + damping_weight * config.damping_nm_s_per_rad[axis] * relative_speed_rad_s,
+                0.0,
+            )
             self._output_nm[axis] += output_alpha * (requested_nm - self._output_nm[axis])
 
         if new_frame:

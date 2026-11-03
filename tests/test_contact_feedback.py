@@ -93,7 +93,6 @@ def test_threshold_equality_and_hysteresis_keep_contact_until_off_dwell():
     _contact(model, target=0.10, current=0.12, velocity=0.2)
     result = _step(model, 0.20, target=0.08, current=0.09)
     assert result.phase == "contact"
-    assert np.all(result.virtual_hand_torque_nm < 0)
     result = _step(model, 0.25, target=0.03)
     assert result.phase == "releasing"
     assert result.active_mask.all()
@@ -219,33 +218,85 @@ def test_cancelled_release_resumes_only_from_zero_not_residual_filter_history():
     assert np.all(np.abs(resumed.virtual_hand_torque_nm) < np.abs(old.virtual_hand_torque_nm))
 
 
-def test_software_spring_and_damping_are_unilateral_and_use_relative_velocity():
-    config = ContactFeedbackConfig(**_data(damping_nm_s_per_rad=[0.1] * 20,
-                                           output_filter_hz=1e6))
+def test_damping_resists_closing_and_reduces_force_when_opening():
+    config = ContactFeedbackConfig(**_data(
+        damping_nm_s_per_rad=[0.1] * 20, output_filter_hz=1e6,
+    ))
     model = ContactImpedance(config)
-    result = _contact(model)
-    # 0.1 Nm/rad * (0.20 - 0.03) rad = 0.017 virtual Nm.
-    np.testing.assert_allclose(result.virtual_hand_torque_nm, -0.017, atol=1e-12)
-    result = _step(model, 0.20, target=0.21)
-    # 目标增长0.01rad/0.05s，增加0.1 Nm*s/rad * 0.2rad/s阻尼。
-    np.testing.assert_allclose(result.virtual_hand_torque_nm, -0.038, atol=1e-12)
-    result = _step(model, 0.25, target=0.20)
-    np.testing.assert_allclose(result.virtual_hand_torque_nm, -0.017, atol=1e-12)
-    result = _step(model, 0.30, target=0.20, velocity=0.1)
-    np.testing.assert_allclose(result.virtual_hand_torque_nm, -0.017, atol=1e-12)
-    result = _step(model, 0.35, target=0.20, velocity=-0.1)
-    np.testing.assert_allclose(result.virtual_hand_torque_nm, -0.027, atol=1e-12)
+    baseline = _contact(model)
+    closing = _step(model, 0.20, target=0.21)
+    assert np.all(closing.virtual_hand_torque_nm < baseline.virtual_hand_torque_nm)
+    opening = _step(model, 0.25, target=0.20)
+    assert np.all(opening.virtual_hand_torque_nm >= baseline.virtual_hand_torque_nm)
+    assert np.all(np.abs(opening.virtual_hand_torque_nm) < np.abs(baseline.virtual_hand_torque_nm))
+    assert np.all(opening.virtual_hand_torque_nm <= 0)
+    slave_closing = _step(model, 0.30, target=0.20, velocity=-0.1)
+    assert np.all(slave_closing.virtual_hand_torque_nm < baseline.virtual_hand_torque_nm)
 
 
-def test_output_low_pass_uses_elapsed_source_time():
-    model = ContactImpedance(ContactFeedbackConfig(**_data(output_filter_hz=1.0)))
-    first = _contact(model)
-    # 一阶1Hz连续极点在50ms的阶跃响应，独立已算数值。
-    np.testing.assert_allclose(first.virtual_hand_torque_nm, -0.004583154252,
-                               atol=1e-12)
-    second = _step(model, 0.20)
-    assert np.all(np.abs(second.virtual_hand_torque_nm) > np.abs(first.virtual_hand_torque_nm))
-    assert np.all(np.abs(second.virtual_hand_torque_nm) < 0.017)
+@pytest.mark.parametrize("direction", [-1.0, 1.0])
+def test_opening_releases_resistance_without_waiting_for_position_threshold(direction):
+    config = ContactFeedbackConfig(**_data(output_filter_hz=1.0))
+    model = ContactImpedance(config)
+    assert np.all(direction * _contact(model, target=direction * 0.2).virtual_hand_torque_nm < 0)
+
+    opening = _step(model, 0.20, target=direction * 0.19)
+    assert opening.phase == "contact"
+    assert opening.active_mask.all()
+    assert not opening.virtual_hand_torque_nm.any()
+
+    held = _step(model, 0.25, target=direction * 0.19)
+    assert held.phase == "contact"
+    assert np.all(direction * held.virtual_hand_torque_nm < 0)
+
+
+@pytest.mark.parametrize("direction", [-1.0, 1.0])
+def test_opening_with_repeated_source_cannot_keep_old_resistance(direction):
+    model = ContactImpedance(ContactFeedbackConfig(**_data()))
+    assert np.all(direction * _contact(model, target=direction * 0.2).virtual_hand_torque_nm < 0)
+    opening = _step(model, 0.15, target=direction * 0.19, received_seconds=0.16)
+    assert opening.phase == "contact"
+    assert not opening.virtual_hand_torque_nm.any()
+
+
+def test_sustained_contact_feedback_increases_with_measured_load():
+    config = ContactFeedbackConfig(**_data(
+        current_filter_hz=1e6, output_filter_hz=1e6,
+    ))
+    model = ContactImpedance(config)
+    lighter = _contact(model, current=0.4)
+    heavier = _step(model, 0.20, current=1.0)
+
+    assert lighter.phase == heavier.phase == "contact"
+    assert np.all(lighter.virtual_hand_torque_nm < 0)
+    assert np.all(np.abs(heavier.virtual_hand_torque_nm) >
+                  1.2 * np.abs(lighter.virtual_hand_torque_nm))
+
+
+def test_large_target_jumps_cannot_produce_unbounded_damping():
+    config = ContactFeedbackConfig(**_data(
+        damping_nm_s_per_rad=[0.1] * 20,
+        current_filter_hz=1e6, output_filter_hz=1e6,
+    ))
+    fast, faster = ContactImpedance(config), ContactImpedance(config)
+    _contact(fast, target=0.30, current=0.12)
+    _contact(faster, target=0.20, current=0.12)
+
+    # 相同终点，两种跳变速度均超过限幅，不能继续放大阻尼。
+    first = _step(fast, 0.20, target=0.50, current=0.12)
+    second = _step(faster, 0.20, target=0.50, current=0.12)
+    np.testing.assert_allclose(first.virtual_hand_torque_nm, second.virtual_hand_torque_nm)
+
+
+def test_output_filter_smooths_contact_onset_without_reversing_torque():
+    slow = ContactImpedance(ContactFeedbackConfig(**_data(output_filter_hz=1.0)))
+    fast = ContactImpedance(ContactFeedbackConfig(**_data(output_filter_hz=1e6)))
+    first = _contact(slow)
+    unfiltered = _contact(fast)
+    second = _step(slow, 0.20)
+    assert np.all(unfiltered.virtual_hand_torque_nm < second.virtual_hand_torque_nm)
+    assert np.all(second.virtual_hand_torque_nm < first.virtual_hand_torque_nm)
+    assert np.all(first.virtual_hand_torque_nm < 0)
 
 
 def test_current_off_clears_output_before_release_dwell_and_does_not_rearm_early():
@@ -358,6 +409,9 @@ def test_reset_clears_derivative_contact_and_filter_history():
     ("dwell_s", True), ("release_dwell_s", 0),
     ("current_filter_hz", float("inf")), ("output_filter_hz", "8"),
     ("max_sample_gap_s", -0.1),
+    ("load_weight_scale_a", 0), ("load_weight_scale_a", float("inf")),
+    ("opening_speed_deadband_rad_s", 0), ("opening_speed_deadband_rad_s", 2.0),
+    ("relative_velocity_limit_rad_s", 0), ("relative_velocity_limit_rad_s", float("nan")),
     ("reflection_gain", 0), ("reflection_gain", -1), ("reflection_gain", True),
     ("reflection_gain", float("nan")), ("reflection_gain", float("inf")),
     ("reflection_gain", "1000"),

@@ -183,6 +183,33 @@ def test_high_current_alone_never_becomes_contact(contact_pair):
     assert glove.commands == [] and glove.homes == 1
 
 
+def test_pinky_small_displacement_and_sustained_load_reach_glove_motor():
+    config = replace(
+        contact_config(), error_on_rad=np.full(20, 0.06),
+        dwell_s=0.04, reflection_gain=6000.0,
+    )
+    pair = create_contact_pair(contact_parameters=config)
+    runtime, hand, glove, _ = pair
+    try:
+        runtime.start()
+        runtime.step()
+        joints = dict.fromkeys(GLOVE_JOINTS, 0.0)
+        joints["pinky_pip"] = 0.09
+        _, motors = glove.model.evaluate(joints)
+        glove.plant.motors = dict(motors)
+        hand.effort[18] = 1.2
+
+        tick = advance_steps(pair, 40)[-1]
+        error = tick.output_positions_rad[18] - tick.hand2_state.positions_rad[18]
+        assert 0.06 < error < 0.10
+        assert tick.force_feedback.contact_active_mask[18]
+        motor_name = glove.model.joint_motor_names["pinky_pip"]
+        motor_index = glove.model.motor_names.index(motor_name)
+        assert abs(tick.force_feedback.model_torque_nm[motor_index]) > 1e-5
+    finally:
+        runtime.close()
+
+
 def test_transition_uses_sent_target_not_unblended_forward_candidate(contact_pair):
     runtime, hand, glove, _ = contact_pair
     set_human(glove, 0.20)
