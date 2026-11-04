@@ -154,6 +154,7 @@ def _format_status(tick, position_ns: int, duration_ns: int, bindings) -> str:
 def _run(args, trajectory: RecordedTrajectory, keys: TerminalKeys | None) -> int:
     from .motor_hand import EncosGloveHardwareDriver
     from .wuji_hand2 import WujiHand2HardwareDriver
+    from .forward_worker import ForwardRetargetWorker
     from .runtime import RetargetPipelineFactory, create_retargeter
     from .force_feedback import ForceFeedbackController
     from .force_linear import MaxTorqueLinearConfig
@@ -164,7 +165,7 @@ def _run(args, trajectory: RecordedTrajectory, keys: TerminalKeys | None) -> int
         address=getattr(args, "wuji_address", "") or "",
         approved_firmware_version=args.approved_firmware,
     )
-    glove = feedback = loop = worker = None
+    glove = feedback = loop = worker = forward_worker = None
     enabled = False
     try:
         bridge = create_retargeter(hand=args.hand, glove_hand=args.glove_hand, asset_root=args.assets)
@@ -192,12 +193,16 @@ def _run(args, trajectory: RecordedTrajectory, keys: TerminalKeys | None) -> int
             worker = InverseWorker(
                 args.hand, args.glove_hand, args.assets, None, glove.model_motor_limits_rad,
             )
+            forward_worker = ForwardRetargetWorker(
+                hand=args.hand, glove_hand=args.glove_hand, asset_root=args.assets,
+            )
         loop = RealWujiControlLoop(
             driver, bridge, glove_driver=glove, force_feedback=feedback,
             glove_follow_actual=args.with_glove,
             compute_shadow_glove=args.with_glove,
             startup_transition_s=args.transition,
             inverse_worker=worker,
+            forward_worker=forward_worker,
         )
         print("正在只读连接并预检轨迹；尚未使能或回零。", flush=True)
         identity = loop.connect(serial_number=args.wuji_serial)
@@ -279,8 +284,12 @@ def _run(args, trajectory: RecordedTrajectory, keys: TerminalKeys | None) -> int
                         if feedback is not None:
                             feedback.close()
                     finally:
-                        if worker is not None:
-                            worker.close()
+                        try:
+                            if worker is not None:
+                                worker.close()
+                        finally:
+                            if forward_worker is not None:
+                                forward_worker.close()
 
 
 def main(argv: list[str] | None = None) -> int:

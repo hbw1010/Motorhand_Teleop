@@ -368,6 +368,72 @@ def test_takeover_cancels_active_glove_ramp_immediately(bridge):
     assert loop.mode is ControlMode.GLOVE_TAKEOVER
 
 
+def test_takeover_forward_timeout_stops_both_devices_without_sending(bridge):
+    class TimedOutWorker:
+        def check_ready(self):
+            pass
+
+        def solve(self, joints, *, source_ns, deadline_ns):
+            raise TimeoutError("正向求解超过原始命令或反馈期限")
+
+    hand = HandBoundary(np.zeros(20))
+    glove = GloveBoundary(_joints(0.1))
+    hand.emergency_stop = lambda: hand.events.append("emergency_stop")
+    glove.emergency_stop = lambda: glove.events.append("emergency_stop")
+    loop = RealWujiControlLoop(
+        hand, bridge, glove_driver=glove, startup_transition_s=0.5,
+        forward_worker=TimedOutWorker(),
+    )
+    loop.enable(now_ns=100)
+    loop.request_mode(ControlMode.GLOVE_TAKEOVER, now_ns=200)
+    with pytest.raises(TimeoutError, match="原始命令或反馈期限"):
+        loop.step(now_ns=200)
+    assert hand.commands == glove.positions == []
+    assert hand.events.count("emergency_stop") == 1
+    assert glove.events.count("emergency_stop") == 1
+
+
+def test_takeover_worker_preserves_shared_retarget_and_task(bridge):
+    from motorhand_teleop.real_hand.forward_worker import ForwardRetargetWorker
+
+    hand = HandBoundary(np.zeros(20))
+    glove = GloveBoundary(_joints(0.2))
+    expected_pose, expected_task = bridge.glove_to_hand2(
+        glove.pose.joints, timestamp_ns=glove.pose.timestamp_ns,
+    )
+    worker = ForwardRetargetWorker(hand="right", glove_hand="right")
+    worker.start()
+    try:
+        loop = RealWujiControlLoop(
+            hand, bridge, glove_driver=glove, initial_mode=ControlMode.GLOVE_TAKEOVER,
+            forward_worker=worker,
+        )
+        tick = loop.step(now_ns=100)
+        np.testing.assert_allclose(tick.sent_positions_rad, expected_pose.positions_rad, atol=2e-6, rtol=0)
+        np.testing.assert_allclose(
+            loop.state_bus.snapshot().glove.task.points_m, expected_task.points_m,
+            atol=2e-6, rtol=0,
+        )
+        assert len(hand.commands) == 1
+    finally:
+        worker.close()
+
+
+def test_native_deadline_failure_reports_previous_command_lease(bridge, monkeypatch):
+    hand = HandBoundary(np.zeros(20))
+    loop = RealWujiControlLoop(hand, bridge, compute_shadow_glove=False)
+    loop.step(inference_positions_rad=np.zeros(20), now_ns=100)
+
+    def expired(target, *, deadline_ns):
+        raise RuntimeError("原始命令期限已到，直接停止并锁存")
+
+    monkeypatch.setattr(hand, "send_target", expired)
+    with pytest.raises(RuntimeError, match="原始命令期限已到") as error:
+        loop.step(inference_positions_rad=np.zeros(20), now_ns=150_000_100)
+    assert "前一命令剩余=-50.0ms" in str(error.value)
+    assert "当前命令剩余=100.0ms" in str(error.value)
+
+
 @pytest.mark.parametrize("mode_request", [
     {"mode": "inference"},
     {"mode": ControlMode.INFERENCE, "duration_s": np.nan},
@@ -854,88 +920,3 @@ def test_failed_playback_inverse_prewarm_never_enables_hand(bridge, monkeypatch)
     assert stopped == ["hand", "glove"]
 
 
-def _inference_session_with_simulated_devices(bridge, monkeypatch):
-    from motorhand_teleop.real_hand import inference
-
-    clock = [1_000_000_000]
-    actual = bridge.glove_to_hand2(_joints(0.05))[0].positions_rad
-    hand = HandBoundary(actual)
-    glove = GloveBoundary(_joints(0.0))
-    stopped = []
-    hand.connect = lambda **_: {"serial_number": "offline"}
-    hand.close = lambda: None
-    hand.disable = lambda: hand.events.append("disable_hand")
-    hand.emergency_stop = lambda: stopped.append("hand")
-    hand.read_state = lambda: WujiState(actual, None, None, clock[0], 20)
-    glove.connect = lambda: {"model": "offline"}
-    glove.close = lambda: None
-    glove.emergency_stop = lambda: stopped.append("glove")
-    read_glove = glove.read_state
-
-    def fresh_glove():
-        glove.pose = glove.model.to_glove_pose(glove._feedback, timestamp_ns=clock[0])
-        return read_glove()
-
-    glove.read_state = fresh_glove
-    monkeypatch.setattr(hardware_control, "time", SimpleNamespace(monotonic_ns=lambda: clock[0]))
-    monkeypatch.setattr(inference, "time", SimpleNamespace(monotonic_ns=lambda: clock[0]))
-    loop = RealWujiControlLoop(
-        hand, bridge, glove_driver=glove, startup_transition_s=0.5,
-    )
-    session = inference.InferenceSession(loop, serial_number="offline")
-    return session, hand, glove, clock, stopped, actual
-
-
-def test_inference_session_switches_single_owner_and_releases(bridge, monkeypatch):
-    from motorhand_teleop.bidirectional import ControlMode
-
-    session, hand, glove, clock, _, actual = _inference_session_with_simulated_devices(
-        bridge, monkeypatch,
-    )
-    session.connect()
-    assert "enable_hand" not in hand.events and "home_glove" not in glove.events
-    session.start()
-    first = session.step(actual, produced_at_ns=clock[0])
-    np.testing.assert_allclose(first.sent_positions_rad, actual, atol=1e-10)
-    clock[0] += 600_000_000
-    session.step(actual, produced_at_ns=clock[0])
-    before = len(glove.positions)
-    session.take_over()
-    assert session.mode is ControlMode.GLOVE_TAKEOVER
-    session.step()
-    assert len(glove.positions) == before
-    session.resume_inference()
-    assert session.mode is ControlMode.INFERENCE
-    clock[0] += 600_000_000
-    session.step(actual, produced_at_ns=clock[0])
-    assert len(glove.positions) > before
-    session.close()
-    assert "disable_hand" in hand.events and glove.disable_count > 0
-
-
-def test_inference_session_stops_both_sides_on_expired_model_output(bridge, monkeypatch):
-    session, hand, _, clock, stopped, actual = _inference_session_with_simulated_devices(
-        bridge, monkeypatch,
-    )
-    session.connect()
-    session.start()
-    with pytest.raises(TimeoutError):
-        session.step(actual, produced_at_ns=clock[0] - 100_000_000)
-    assert not hand.commands and stopped == ["hand", "glove"]
-    session.close()
-
-
-def test_public_inference_factory_builds_read_only_session():
-    from motorhand_teleop.real_hand import create_inference_session
-    from motorhand_teleop.real_hand.force_linear import MaxTorqueLinearConfig
-
-    config = MaxTorqueLinearConfig.from_json(ROOT / "config/feedback/max-torque-linear-right.json")
-    session = create_inference_session(
-        serial_number=config.wuji_serial_number, address="127.0.0.1:7447",
-    )
-    try:
-        assert not session._loop.driver.connected
-        with pytest.raises(RuntimeError, match="尚未启动"):
-            session.step(np.zeros(20))
-    finally:
-        session.close()

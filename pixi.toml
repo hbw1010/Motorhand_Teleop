@@ -18,6 +18,11 @@ python-can = ">=4.3.0"
 pyserial = ">=3.5"
 pyqt = ">=5.15"
 cxx-compiler = ">=1.11,<2"
+cmake = ">=3.22"
+tinyxml2 = ">=10,<12"
+yaml-cpp = ">=0.7,<1"
+nlohmann_json = ">=3.11,<4"
+openssl = ">=3,<4"
 
 [pypi-dependencies]
 motorhand-teleop = { path = ".", editable = true }
@@ -34,8 +39,8 @@ OMP_NUM_THREADS = "1"
 demo = "python -m motorhand_teleop.cli demo"
 validate-assets = "python -m motorhand_teleop.cli validate-assets"
 test = "python -m pytest -q"
-test-glove-chain = "python -m pytest -o addopts='' tests/test_ve33_native.py tests/test_ve33_motor_roundtrip.py tests/test_ve33_adapter.py tests/test_encos_hardware.py tests/test_encos_controller.py tests/test_encos_zero_step.py tests/test_hardware_control_coordinates.py tests/test_bidirectional.py tests/test_bidirectional_models.py tests/test_landmarks.py tests/test_retargeting.py tests/test_feedback.py tests/test_force_feedback.py tests/test_force_geometry.py tests/test_contact_feedback.py tests/test_contact_latency.py tests/test_contact_runtime.py tests/test_force_linear.py tests/test_curve_telemetry.py tests/test_wuji_native.py tests/test_real_hand_runtime.py tests/test_inverse_realtime.py tests/test_training_assets.py tests/test_mujoco_sim.py -q --tb=short"
-test-record-replay = "python -m pytest -o addopts='' tests/test_trajectory.py tests/test_playback.py tests/test_inverse_worker.py tests/test_inverse_realtime.py tests/test_hardware_control_coordinates.py tests/test_bidirectional.py tests/test_real_hand_runtime.py tests/test_contact_runtime.py -q --tb=short"
+test-glove-chain = "python -m pytest -o addopts='' tests/test_ve33_native.py tests/test_ve33_motor_roundtrip.py tests/test_ve33_adapter.py tests/test_encos_hardware.py tests/test_encos_controller.py tests/test_encos_zero_step.py tests/test_hardware_control_coordinates.py tests/test_bidirectional.py tests/test_bidirectional_models.py tests/test_landmarks.py tests/test_retargeting.py tests/test_feedback.py tests/test_force_feedback.py tests/test_force_geometry.py tests/test_contact_feedback.py tests/test_contact_latency.py tests/test_contact_runtime.py tests/test_force_linear.py tests/test_curve_telemetry.py tests/test_wuji_native.py tests/test_forward_worker.py tests/test_real_hand_runtime.py tests/test_inverse_realtime.py tests/test_training_assets.py tests/test_mujoco_sim.py -q --tb=short"
+test-record-replay = "python -m pytest -o addopts='' tests/test_trajectory.py tests/test_playback.py tests/test_forward_worker.py tests/test_inverse_worker.py tests/test_inverse_realtime.py tests/test_hardware_control_coordinates.py tests/test_bidirectional.py tests/test_real_hand_runtime.py tests/test_contact_runtime.py -q --tb=short"
 strict-validation = "python -m motorhand_teleop.validation"
 mujoco-force-feedback = "python -m motorhand_teleop.mujoco_sim"
 mujoco-viewer = "python -m motorhand_teleop.mujoco_viewer"
@@ -52,18 +57,20 @@ gui = "python hardware/encos_dexhand/apps/gui_master.py"
 encos-live-viewer = "python -m motorhand_teleop.encos_live_viewer"
 build-real-hand = "cmake -S src/motorhand_teleop/real_hand/native -B .cache/native-real-hand/build -DREAL_HAND_BUILD_TESTS=ON && cmake --build .cache/native-real-hand/build --parallel"
 test-real-hand-native = "ctest --test-dir .cache/native-real-hand/build --output-on-failure"
+build-control = { cmd = "cmake -S src/motorhand_teleop/real_hand/native_control -B .cache/native-control/build -DCMAKE_BUILD_TYPE=Release -DMOTORHAND_NATIVE_TESTS=ON && cmake --build .cache/native-control/build --parallel 4", depends-on = ["build-real-hand"] }
+test-control-native = { cmd = "ctest --test-dir .cache/native-control/build --output-on-failure", depends-on = ["build-control"] }
 real-hand = "python -m motorhand_teleop.real_hand"
-wuji-teleop = "python -m motorhand_teleop.real_hand follow --mode glove-to-hand2 --approved-firmware 2.2.3 --rate 50 --execute"
-wuji-force-linear = "python -m motorhand_teleop.real_hand follow --mode glove-to-hand2 --approved-firmware 2.2.3 --rate 50 --feedback-linear-config config/feedback/max-torque-linear-right.json --execute"
+wuji-teleop = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native teleop --execute", depends-on = ["build-control"] }
+wuji-force-linear = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native force-linear --execute", depends-on = ["build-control"] }
 force-ui = "python -m motorhand_teleop.real_hand.force_curves"
 plotjuggler = "bash scripts/ros_plotjuggler.sh plot"
 plotjuggler-pinky = "bash scripts/ros_plotjuggler.sh plot --nosplash --buffer_size 20 --layout config/plotjuggler-pinky-right.xml"
 plotjuggler-bridge = "bash scripts/ros_plotjuggler.sh bridge"
 plotjuggler-demo = "bash scripts/ros_plotjuggler.sh demo"
-wuji-force-contact = "RUST_LOG=warn python -m motorhand_teleop.real_hand follow --mode glove-to-hand2 --approved-firmware 2.2.3 --rate 50 --feedback-linear-config config/feedback/max-torque-linear-right.json --contact-feedback-config config/feedback/contact-impedance-right.json --execute --torque-only"
-wuji-record = "python -m motorhand_teleop.real_hand follow --mode glove-to-hand2 --approved-firmware 2.2.3 --rate 50 --execute --record"
-wuji-replay = "RUST_LOG=warn python -m motorhand_teleop.real_hand.playback --approved-firmware 2.2.3 --rate 50"
-wuji-takeover = "RUST_LOG=warn python -m motorhand_teleop.real_hand.playback --approved-firmware 2.2.3 --rate 50 --with-glove --execute"
+wuji-force-contact = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native force-contact --execute", depends-on = ["build-control"] }
+wuji-record = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native record --execute", depends-on = ["build-control"] }
+wuji-replay = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native replay", depends-on = ["build-control"] }
+wuji-takeover = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native takeover --execute", depends-on = ["build-control"] }
 wuji-discover = "python -m motorhand_teleop.real_hand discover"
 
 [feature.hardware.pypi-dependencies]

@@ -15,13 +15,13 @@
 ```bash
 cd /home/boen/hand/Motorhand_Teleop
 pixi install -e hardware
-pixi run -e hardware build-real-hand
+pixi run -e hardware build-control
 pixi run -e hardware wuji-discover
 ```
 
-`build-real-hand` 首次需要联网获取固定版本官方 C SDK；宿主需 `libudev`。Wuji SDK 固定为 `2026.8.31`，默认批准固件 `2.2.3`。发现过程只读、不使能。无显式序列号时，仅在发现**唯一**二代手时自动选择；优先使用 SDK 发现的 UDP 地址。若同一设备出现多个地址，仅在系统路由明确指向唯一物理有线网卡时自动选该地址，否则要求人工指定；连接后核对 SN、手侧和实测固件。项目不会修改网卡或 IP；单一 UDP 地址不单独证明流量走网线。
+`build-control` 首次需要联网获取固定版本官方 C SDK，并构建 C++ 控制程序；宿主需 `libudev`。Wuji SDK 固定为 `2026.8.31`，默认批准固件 `2.2.3`。`wuji-discover` 为只读发现，不使能。
 
-多台设备请使用通用入口的 `--wuji-serial`；自动发现不可用时还可指定 `--wuji-address`，地址连接仍会核验 SN。不要同时用 GUI、其他控制进程占用设备或使用同一曲线端口。
+常用 C++ 控制命令自动发现 Wuji，并要求唯一设备及唯一物理有线路由；多台设备时可追加 `--wuji-serial 序列号`。程序核对设备手侧和实际固件，不修改网卡或 IP。不要同时使用其他控制进程占用设备或同一曲线端口。
 
 ## 常用命令
 
@@ -80,7 +80,9 @@ pixi run -e hardware wuji-takeover -- recordings/demo.jsonl
 
 录制初始化时立即覆盖同名文件，旧数据不会保留；启动失败或中途异常也不会恢复旧文件。不要让多个录制进程同时写同一文件。
 
-默认 `--speed 1.0`、50 Hz、启动及切换过渡 0.5 s。回放身份、固件和关节限位在使能前核验；轨迹保存原始采样时间、位置、速度、电流和发送目标，带完整性校验。手套逆解的数据超期时暂停轨迹并等待新鲜结果，不延长原始 100 ms 期限；持续无解会停止。回放过程按 **T 或空格**切换手套接管/恢复，按 **Q** 退出。人工接管暂停轨迹，手套跟随停止，力反馈接管开始；恢复时从暂停位置平滑衔接。
+常用实时控制指令使用 C++：手套采集与输出、Wuji 读写、正逆向求解、回放时钟、接管及力反馈均由原生代码执行。逆解、力反馈雅可比和手套串口发送独立运行；手套发送采用最新目标，反馈显示区分原始数据时刻与异步串口提交时刻。
+
+回放正常倍速、默认 50 Hz，启动及切换过渡 0.5 s；目前不提供低倍速参数。回放身份、固件和关节限位在使能前核验；轨迹保存原始采样时间、位置、速度、电流和发送目标，带完整性校验。手套逆解未就绪时暂停轨迹并等待新鲜结果；命令和真实反馈仍按原始时间戳执行 100 ms 时限，不能对旧帧续期，持续无解或设备故障会停止输出。回放过程按 **T 或空格**切换手套接管/恢复，按 **Q** 退出。人工接管暂停轨迹，手套跟随停止，力反馈接管开始；恢复时从暂停位置平滑衔接。
 
 ### 查看实时反馈曲线
 
@@ -93,9 +95,11 @@ pixi run -e hardware force-ui
 
 窗口分开显示 Wuji 实测电流、目标/实际位置、手套名义前馈及可用的手套实测电流；关闭窗口不会停止控制，需在控制终端按 Ctrl+C。PlotJuggler 需系统 ROS Humble：用 `pixi run plotjuggler-bridge -- --forward-port 8765` 接收 UDP 8766 并转发至 UI，再运行 `pixi run plotjuggler-pinky`；此时控制命令使用 `--curves-port 8766`。
 
+曲线窗口的手套力矩是异步串口已提交的名义前馈，不等于电机实测输出；输出源龄对应生成该命令的数据，不与当前 Wuji 帧混为同一时刻。若真机反复报告 `Enc1BitRate`，需检查对应编码器/磁铁及连接，不能仅通过软件消除。
+
 ## 外部模型推理接口
 
-从 `motorhand_teleop.real_hand` 导入 `create_inference_session`；工厂发现设备但不使能，上下文进入时只读连接和预热，`start()` 才执行回零和使能。下面示例只保持当前实测关节姿态，用于说明调用顺序；真实模型应替换 `target`。
+从 `motorhand_teleop.real_hand` 导入 `create_inference_session`；构造不连接设备，上下文进入时只读连接，`start()` 才执行回零和使能。Python 仅提供模型输出与调度，控制、求解和设备通信在 C++。下面示例保持当前实测关节姿态，用于说明调用顺序；真实模型应替换 `target`。
 
 ```python
 import time
@@ -113,9 +117,9 @@ with create_inference_session() as session:
         time.sleep(max(0.0, 0.02 - (time.monotonic() - cycle_start)))
 ```
 
-`session.take_over()` 切换到手套主导；期间持续调用 `session.step()`。`session.resume_inference()` 切回推理，之后继续传 20 维目标。`produced_at_ns` 使用与 `time.monotonic_ns()` 同一时钟域的输入/目标最早生成时间；超期或未来时刻拒发。省略时间戳时，调用方必须保证目标新鲜，接口无法检测模型上游的旧缓存。控制周期和模型推理调度由调用方负责。
+`session.take_over()` 切换到手套主导；期间持续调用 `session.step()`。`session.resume_inference()` 切回推理，之后继续传 20 维目标。推理主导时必须提供 `produced_at_ns`：使用与 `time.monotonic_ns()` 同一时钟域的输入或目标最早生成时间；超期或未来时刻拒发，不能在提交前刷新旧帧时戳。控制周期和模型推理调度由调用方负责。
 
-`tick.hand2_state` 为实际设备反馈，`tick.sent_positions_rad` 为已提交 Wuji 的最终目标，`tick.shadow_glove_positions_rad` 为手套目标；`tick.force_feedback` 包含反馈状态和名义指令，不等于实测接触力。关节顺序见 `motorhand_teleop.domain.WUJI_JOINTS`。键盘接管已由回放命令实现，模型应用可把自身按键事件接到上述两个方法。
+`tick.hand2_state` 是实测状态（`positions_rad`、`velocities_rad_s`、`effort_a` 和 `received_ns`），`tick.sent_positions_rad` 是已提交 Wuji 的目标。`tick.glove_output` 为 `None` 表示尚无串口提交：推理模式为模型电机角 m12 rad，接管模式为名义力矩 Nm；均不是手套实测指节或实测力矩。`glove_output_source_ns` 与 `glove_submit_ns` 分别是其原始来源和串口提交时间。`tick.virtual_hand_nm` 是软件估计，不等于实测接触力。关节顺序见 `motorhand_teleop.domain.WUJI_JOINTS`。键盘接管已由回放命令实现，模型应用可把自身按键事件接到上述两个方法。
 
 ## 配置与资产
 
@@ -137,6 +141,7 @@ with create_inference_session() as session:
 pixi run -e hardware test-glove-chain
 pixi run -e hardware test-record-replay
 pixi run -e hardware test-real-hand-native
+pixi run -e hardware test-control-native
 pixi run mujoco-force-feedback
 ```
 

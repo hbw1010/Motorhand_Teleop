@@ -282,7 +282,7 @@ def _joints(amount):
     return joints
 
 
-def _pair(bridge, *, mode=FollowMode.GLOVE_TO_HAND2, execute=True):
+def _pair(bridge, *, mode=FollowMode.GLOVE_TO_HAND2, execute=True, forward_worker=None):
     clock = Clock()
     positions = bridge.glove_to_hand2(_joints(0.1))[0].positions_rad
     retargeter = bridge.forward.retargeter
@@ -291,7 +291,7 @@ def _pair(bridge, *, mode=FollowMode.GLOVE_TO_HAND2, execute=True):
     glove = MotorPlant(clock, bridge.forward.landmarks.model, _joints(0.03))
     runtime = PairRuntime(
         hand, glove, bridge, mode=mode, execute=execute,
-        clock_ns=clock, transition_s=0.2,
+        clock_ns=clock, transition_s=0.2, forward_worker=forward_worker,
     )
     runtime.connect(serial_number="explicit-test-SN")
     return runtime, hand, glove, clock
@@ -450,6 +450,66 @@ def test_slow_real_solver_cannot_extend_original_deadline(bridge, monkeypatch):
         runtime.step()
     assert hand.commands == glove.commands == []
     assert hand.disabled == 1 and glove.disabled == 0
+
+
+def test_post_solve_stale_glove_reports_motor_and_stage_latency(bridge, monkeypatch):
+    runtime, hand, glove, clock = _pair(bridge)
+    runtime.start()
+    glove.stamp_offset = -75_000_000
+    original_read = glove.read_state
+    original_solve = bridge.glove_to_hand2
+
+    def read_with_motor_timestamps():
+        state = original_read()
+        state.feedback_by_motor = {
+            motor_id: {"received_ns": state.received_ns + (0 if motor_id == 6 else 10_000_000)}
+            for motor_id in range(1, 13)
+        }
+        return state
+
+    def solve_with_delay(*args, **kwargs):
+        result = original_solve(*args, **kwargs)
+        clock.advance(0.040)
+        return result
+
+    monkeypatch.setattr(glove, "read_state", read_with_motor_timestamps)
+    monkeypatch.setattr(bridge, "glove_to_hand2", solve_with_delay)
+    with pytest.raises(TimeoutError, match="MotorHand真实反馈过期") as error:
+        runtime.step()
+    message = str(error.value)
+    assert "反馈年龄=115.0ms" in message
+    assert "采样+手套FK=0.0ms" in message
+    assert "求解+预检=40.0ms" in message
+    assert "采样时手套最老反馈=75.0ms" in message
+    assert "最老电机=J6" in message
+    assert hand.commands == glove.commands == []
+    assert hand.disabled == 1 and glove.disabled == 0
+
+
+def test_forward_worker_timeout_disables_wuji_without_sending(bridge):
+    class TimedOutWorker:
+        def start(self):
+            pass
+
+        def check_ready(self):
+            pass
+
+        def solve(self, joints, *, source_ns, deadline_ns):
+            if deadline_ns is None:
+                return bridge.glove_to_hand2(joints, timestamp_ns=source_ns)[0]
+            raise TimeoutError("正向求解超过原始命令或反馈期限")
+
+        def close(self):
+            pass
+
+    runtime, hand, glove, _ = _pair(bridge, forward_worker=TimedOutWorker())
+    runtime.prepare()
+    runtime.start()
+    with pytest.raises(TimeoutError, match="原始命令或反馈期限"):
+        runtime.step()
+    assert hand.commands == glove.commands == []
+    assert hand.disabled == 1 and glove.disabled == 0
+    runtime.close()
 
 
 def test_preflight_failure_never_sends_and_stops_only_owned_output(bridge):

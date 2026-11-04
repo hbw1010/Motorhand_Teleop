@@ -729,7 +729,11 @@ class EncosGloveHardwareDriver:
             if isinstance(stamp, bool) or not isinstance(stamp, int):
                 raise EncosHardwareUnavailable(f"motor {mid} 缺少真实接收时戳，禁止使用缓存读出时间替代")
             if not 0 <= checked_ns - stamp <= self.feedback_timeout_ns:
-                raise EncosHardwareUnavailable(f"motor {mid} 反馈已过期或时钟域错误")
+                raise EncosHardwareUnavailable(
+                    f"motor {mid} 反馈已过期或时钟域错误"
+                    f"（反馈年龄={(checked_ns - stamp) / 1e6:.1f}ms，"
+                    f"上限={self.feedback_timeout_ns / 1e6:.1f}ms）"
+                )
             stamps.append(stamp)
             if "angle_deg" not in diagnostic:
                 raise EncosHardwareUnavailable(f"motor {mid} 缺少原始角度反馈")

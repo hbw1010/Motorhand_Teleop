@@ -149,6 +149,7 @@ class PairRuntime:
         transition_s: float = 0.5,
         clock_ns: Callable[[], int] | None = None,
         force_feedback: ForceFeedbackController | None = None,
+        forward_worker=None,
     ) -> None:
         if command_timeout_ns <= 0 or max_state_age_ns <= 0:
             raise ValueError("命令期限和反馈最大年龄必须为正数")
@@ -158,6 +159,7 @@ class PairRuntime:
         self.glove_driver = glove_driver
         self.retargeter = retargeter
         self.force_feedback = force_feedback
+        self._forward_worker = forward_worker
         self.execute = bool(execute)
         self.mode = FollowMode(mode)
         self.command_timeout_ns = int(command_timeout_ns)
@@ -179,10 +181,12 @@ class PairRuntime:
             raise RuntimeError("配对会话已经关闭")
         if not isinstance(serial_number, str) or not serial_number.strip():
             raise ValueError("连接必须指定 Wuji 序列号，禁止自动选择首个设备")
-        self.identities["wuji_hand2"] = _identity_json(
-            self.driver.connect(serial_number=serial_number)
-        )
         try:
+            if self._forward_worker is not None:
+                self._forward_worker.start()
+            self.identities["wuji_hand2"] = _identity_json(
+                self.driver.connect(serial_number=serial_number)
+            )
             if self.force_feedback is not None:
                 self.force_feedback.config.validate_serial(
                     self.identities["wuji_hand2"]["serial_number"],
@@ -195,7 +199,11 @@ class PairRuntime:
             try:
                 self.glove_driver.close()
             finally:
-                self.driver.close()
+                try:
+                    self.driver.close()
+                finally:
+                    if self._forward_worker is not None:
+                        self._forward_worker.close()
             raise
         return dict(self.identities)
 
@@ -205,7 +213,10 @@ class PairRuntime:
         if stamp > now:
             raise ValueError(f"{label}接收时刻位于未来")
         if now - stamp > self.max_state_age_ns:
-            raise TimeoutError(f"{label}真实反馈过期")
+            raise TimeoutError(
+                f"{label}真实反馈过期（反馈年龄={(now - stamp) / 1e6:.1f}ms，"
+                f"上限={self.max_state_age_ns / 1e6:.1f}ms）"
+            )
 
     def _check_samples(self, hand, glove, now: int) -> None:
         self._check_stamp(hand.received_ns, now, "Wuji")
@@ -261,9 +272,7 @@ class PairRuntime:
         if not self.glove_driver.mapping_calibrated:
             raise ValueError("MotorHand 映射未标定，禁止预热双向跟随")
         if requested is FollowMode.GLOVE_TO_HAND2:
-            pose, _ = self.retargeter.glove_to_hand2(
-                glove.pose.joints, timestamp_ns=glove.pose.timestamp_ns,
-            )
+            pose = self._forward_pose(glove)
             self._forward_success(pose)
             positions = self._constrain_hand(pose.positions_rad)
             self.retargeter.hand2_model.state(positions, timestamp_ns=hand.received_ns)
@@ -290,6 +299,17 @@ class PairRuntime:
             raise RuntimeError("配对会话已关闭或已经运行")
         self._activate(self.mode)
 
+    def _forward_pose(self, glove, *, deadline_ns: int | None = None):
+        if self._forward_worker is not None:
+            return self._forward_worker.solve(
+                glove.pose.joints, source_ns=glove.pose.timestamp_ns,
+                deadline_ns=deadline_ns,
+            )
+        pose, _ = self.retargeter.glove_to_hand2(
+            glove.pose.joints, timestamp_ns=glove.pose.timestamp_ns,
+        )
+        return pose
+
     def request_mode(self, mode: FollowMode | str) -> None:
         """切换唯一输出源；新跟随端使用实测姿态而不是另一端旧目标锚定。"""
         if not self._running:
@@ -302,6 +322,8 @@ class PairRuntime:
     def _activate(self, mode: FollowMode) -> None:
         try:
             # 先检查双方真实反馈和标定，再释放旧输出/获得新输出。
+            if mode is FollowMode.GLOVE_TO_HAND2 and self._forward_worker is not None:
+                self._forward_worker.check_ready()
             self._sample()
             if not self.glove_driver.mapping_calibrated:
                 raise ValueError("MotorHand 映射未标定，禁止双向跟随")
@@ -380,12 +402,16 @@ class PairRuntime:
             raise RuntimeError("跟随前必须 start；异常后必须显式重新启动")
         started = self._clock()
         deadline = started + self.command_timeout_ns
+        glove = sampled = finished = None
         try:
             hand, glove = self._sample()
+            sampled = self._clock()
             if self.mode is FollowMode.GLOVE_TO_HAND2:
-                pose, _ = self.retargeter.glove_to_hand2(
-                    glove.pose.joints, timestamp_ns=glove.pose.timestamp_ns,
+                feedback_deadline = min(
+                    deadline, glove.received_ns + self.max_state_age_ns,
+                    glove.pose.timestamp_ns + self.max_state_age_ns,
                 )
+                pose = self._forward_pose(glove, deadline_ns=feedback_deadline)
                 self._forward_success(pose)
                 candidate = self._constrain_hand(pose.positions_rad)
                 # 固定侧摆只约束求解候选，不覆盖反馈锚点。凸过渡由真实位置
@@ -474,6 +500,24 @@ class PairRuntime:
                 deadline, self.execute, glove, feedback, started, completed,
                 wuji_submit_ns, glove_submit_ns,
             )
+        except TimeoutError as error:
+            self._running = False
+            self._release_output()
+            if glove is None or sampled is None:
+                raise
+            checked = self._clock() if finished is None else finished
+            feedback = getattr(glove, "feedback_by_motor", {})
+            oldest = sorted(
+                int(mid) for mid, entry in feedback.items()
+                if entry.get("received_ns") == glove.received_ns
+            )
+            axes = ",".join(f"J{mid}" for mid in oldest) if oldest else "未知"
+            raise TimeoutError(
+                f"{error}；采样+手套FK={(sampled - started) / 1e6:.1f}ms；"
+                f"求解+预检={(checked - sampled) / 1e6:.1f}ms；"
+                f"采样时手套最老反馈={(sampled - glove.received_ns) / 1e6:.1f}ms；"
+                f"最老电机={axes}"
+            ) from None
         except BaseException:
             self._running = False
             self._release_output()
@@ -509,8 +553,12 @@ class PairRuntime:
                 try:
                     self.glove_driver.close()
                 finally:
-                    if self.force_feedback is not None:
-                        self.force_feedback.close()
+                    try:
+                        if self._forward_worker is not None:
+                            self._forward_worker.close()
+                    finally:
+                        if self.force_feedback is not None:
+                            self.force_feedback.close()
 
     def __enter__(self):
         return self
@@ -703,9 +751,19 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 contact_config=contact_config,
             )
+        from .forward_worker import ForwardRetargetWorker
+
+        forward_worker = (
+            ForwardRetargetWorker(
+                hand=args.hand, glove_hand=args.glove_hand,
+                asset_root=args.assets, config_path=args.config,
+            )
+            if args.mode == FollowMode.GLOVE_TO_HAND2.value else None
+        )
         runtime = PairRuntime(
             driver, glove, bridge, execute=args.execute, mode=args.mode,
             transition_s=args.transition, force_feedback=feedback,
+            forward_worker=forward_worker,
         )
         runtime.connect(serial_number=args.wuji_serial)
         if args.record is not None:

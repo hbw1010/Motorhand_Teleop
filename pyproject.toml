@@ -30,6 +30,10 @@ motorhand_teleop = [
   "real_hand/native/tests/*.cpp",
   "real_hand/native/tests/*.c",
   "real_hand/native/tests/*.h",
+  "real_hand/native_control/*.cpp",
+  "real_hand/native_control/*.h",
+  "real_hand/native_control/*.hpp",
+  "real_hand/native_control/CMakeLists.txt",
 ]
 
 [project.scripts]

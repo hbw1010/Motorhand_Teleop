@@ -28,7 +28,7 @@ NS = 1_000_000_000
 
 POSITION_TOPICS = frozenset((
     'wuji_position_rad', 'wuji_target_rad',
-    'glove_position_rad', 'glove_target_position_rad',
+    'glove_position_rad', 'glove_target_position_rad', 'glove_target_motor_rad',
 ))
 NUMERIC_TOPICS = (
     'wuji_current_a', 'wuji_tracking_error_rad', 'wuji_velocity_rad_s',
@@ -36,8 +36,8 @@ NUMERIC_TOPICS = (
     'glove_nominal_feedforward_a', 'glove_nominal_feedforward_nm',
     'wuji_frame_age_s', 'glove_frame_age_s', 'telemetry_age_at_bridge_s',
     'jacobian_reported_age_s', 'glove_sample_to_wuji_submit_s',
-    'wuji_sample_to_glove_submit_s', 'control_cycle_duration_s',
-    'glove_motor_sample_spread_s', 'wuji_following_lag_estimate_s',
+    'wuji_sample_to_glove_submit_s', 'feedback_source_to_glove_submit_s',
+    'control_cycle_duration_s', 'glove_motor_sample_spread_s', 'wuji_following_lag_estimate_s',
     'stream_alive', 'wuji_lag_estimate_valid', 'telemetry_source_code',
     'feedback_projection_code', 'contact_state_code',
     *(f'{kind}_motor_{i}' for kind in ('glove_raw_position_deg', 'glove_current_a') for i in range(1, 13)),
@@ -90,11 +90,12 @@ class SessionGate:
         if (not isinstance(session, str) or not 0 < len(session) <= 128 or
                 type(sequence) is not int or sequence < 0 or not valid_time(source_time, now) or
                 sample.get('source') not in ('hardware', 'demo') or
-                sample.get('mode') not in ('glove-to-hand2', 'hand2-to-glove')):
+                sample.get('mode') not in ('glove-to-hand2', 'hand2-to-glove', 'inference-to-both')):
             return False
         # 出现不可能属于本机的可选时间时整包拒绝，而不是改变时钟域。
         for key in ('timestamp_ns', 'published_ns', 'wuji_received_ns', 'glove_received_ns',
-                    'cycle_started_ns', 'cycle_completed_ns', 'wuji_submit_ns', 'glove_submit_ns'):
+                    'cycle_started_ns', 'cycle_completed_ns', 'wuji_submit_ns', 'glove_submit_ns',
+                    'glove_output_source_ns'):
             value = sample.get(key)
             if value is not None and (type(value) is not int or value <= 0 or value > now):
                 return False
@@ -190,6 +191,8 @@ def fields(sample, now):
         ('wuji_target_rad', 20, wn, 'wuji_submit_ns', 'wuji_target_rad'),
         ('glove_position_rad', 12, gn, 'glove_received_ns', 'glove_position_rad'),
         ('glove_target_position_rad', 12, gn, 'glove_submit_ns', 'glove_target_position_rad'),
+        ('glove_target_motor_rad', 12, [f'{name}_motor' for name in gn] if gn else None,
+         'glove_submit_ns', 'glove_target_motor_rad'),
         ('wuji_current_a', 20, wn, 'wuji_received_ns', 'wuji_current_a'),
         ('wuji_tracking_error_rad', 20, wn, 'wuji_submit_ns', 'wuji_tracking_error_rad'),
         ('wuji_velocity_rad_s', 20, wn, 'wuji_received_ns', 'wuji_velocity_rad_s'),
@@ -202,9 +205,9 @@ def fields(sample, now):
         specs.append(('glove_target', 12, motors, 'glove_submit_ns',
                       'glove_nominal_feedforward_' + ('a' if unit == 'A' else 'nm')))
     for key, count, axis_names, time_key, topic in specs:
-        if key == 'wuji_target_rad' and sample.get('mode') != 'glove-to-hand2':
+        if key == 'wuji_target_rad' and sample.get('mode') not in ('glove-to-hand2', 'inference-to-both'):
             continue
-        if key == 'glove_target_position_rad' and sample.get('mode') != 'hand2-to-glove':
+        if key in ('glove_target_position_rad', 'glove_target_motor_rad') and sample.get('mode') not in ('hand2-to-glove', 'inference-to-both'):
             continue
         values, stamp = numbers(sample, key, count), sample.get(time_key)
         if axis_names is None or values is None or not valid_time(stamp, now):
@@ -236,8 +239,12 @@ def diagnostics(sample, now):
     pub = sample.get('published_ns')
     if type(jac) is int and jac >= 0 and valid_time(pub, now) and jac <= pub:
         result.append(('jacobian_reported_age_s', jac / NS))
-    for source, submit, name in [('glove_received_ns', 'wuji_submit_ns', 'glove_sample_to_wuji_submit_s'),
-                                 ('wuji_received_ns', 'glove_submit_ns', 'wuji_sample_to_glove_submit_s')]:
+    pairs = [('glove_received_ns', 'wuji_submit_ns', 'glove_sample_to_wuji_submit_s')]
+    if sample.get('glove_output_source_ns') is not None:
+        pairs.append(('glove_output_source_ns', 'glove_submit_ns', 'feedback_source_to_glove_submit_s'))
+    else:
+        pairs.append(('wuji_received_ns', 'glove_submit_ns', 'wuji_sample_to_glove_submit_s'))
+    for source, submit, name in pairs:
         start, end = sample.get(source), sample.get(submit)
         if valid_time(start, now) and valid_time(end, now) and start <= end:
             result.append((name, (end - start) / NS))
@@ -420,7 +427,7 @@ def run(args):
                 target = numbers(sample, 'wuji_target_rad', 20)
                 actual = numbers(sample, 'wuji_position_rad', 20)
                 tt, at = sample.get('wuji_submit_ns'), sample.get('wuji_received_ns')
-                if (sample.get('mode') != 'glove-to-hand2' or target is None or actual is None or
+                if (sample.get('mode') not in ('glove-to-hand2', 'inference-to-both') or target is None or actual is None or
                     target[args.lag_axis] is None or actual[args.lag_axis] is None or
                     not valid_time(tt, now) or not valid_time(at, now)):
                     self.lag.clear()

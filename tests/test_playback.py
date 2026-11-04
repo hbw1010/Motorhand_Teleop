@@ -117,7 +117,7 @@ def test_recorded_motion_replays_and_keyboard_switches_to_contact_feedback(tmp_p
     from test_contact_runtime import create_contact_pair, human_joints, set_human
     from motorhand_teleop.domain import WujiState
     from motorhand_teleop.real_hand import (
-        contact_feedback, control, force_feedback, force_linear, inverse_worker,
+        contact_feedback, control, force_feedback, force_linear, forward_worker, inverse_worker,
         motor_hand, playback, runtime, wuji_hand2,
     )
     from motorhand_teleop.real_hand.trajectory import RecordedTrajectory, TrajectoryRecorder
@@ -151,6 +151,25 @@ def test_recorded_motion_replays_and_keyboard_switches_to_contact_feedback(tmp_p
         def close(self):
             pass
 
+    class DeterministicForwardWorker:
+        """复用真实正向求解，周期测试使用同一确定性时钟。"""
+        def __init__(self, *, hand, glove_hand, asset_root=None, config_path=None):
+            self.bridge = make_bridge(
+                hand=hand, glove_hand=glove_hand, asset_root=asset_root, config_path=config_path,
+            )
+
+        def start(self):
+            pass
+
+        def check_ready(self):
+            pass
+
+        def solve(self, joints, *, source_ns, deadline_ns):
+            return self.bridge.glove_to_hand2(joints, timestamp_ns=source_ns)[0]
+
+        def close(self):
+            pass
+
     pair, hand, glove, clock = create_contact_pair()
     bridge, feedback = pair.retargeter, pair.force_feedback
     path = tmp_path / "recording.jsonl"
@@ -176,6 +195,7 @@ def test_recorded_motion_replays_and_keyboard_switches_to_contact_feedback(tmp_p
     hand.lower_limits, hand.upper_limits = hand.limits[:, 0], hand.limits[:, 1]
     glove.emergency_stop = glove.disable
     monkeypatch.setattr(inverse_worker, "InverseWorker", DeterministicWorker)
+    monkeypatch.setattr(forward_worker, "ForwardRetargetWorker", DeterministicForwardWorker)
     monkeypatch.setattr(wuji_hand2, "WujiHand2HardwareDriver", lambda **_: hand)
     monkeypatch.setattr(motor_hand, "EncosGloveHardwareDriver", lambda **_: glove)
     monkeypatch.setattr(runtime, "create_retargeter", lambda **_: bridge)

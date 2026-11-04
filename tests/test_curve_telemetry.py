@@ -219,6 +219,19 @@ def test_optional_diagnostic_vectors_validate_dimension_and_numeric_type(key, co
         decode_sample(json.dumps(sample).encode())
 
 
+def test_inference_telemetry_allows_both_hand_and_motor_targets():
+    from motorhand_teleop.real_hand.force_curves import make_demo_sample
+
+    sample = make_demo_sample(1.0, 1_000_000_000)
+    sample.update(mode="inference-to-both", wuji_target_rad=[0.2] * 20,
+                  glove_target_motor_rad=[0.4] * 12,
+                  wuji_tracking_error_rad=[0.1] * 20)
+    received = decode_sample(json.dumps(sample).encode())
+    assert received["wuji_target_rad"] == [0.2] * 20
+    assert received["glove_target_motor_rad"] == [0.4] * 12
+    assert received.get("glove_target_position_rad") is None
+
+
 @pytest.mark.parametrize("gain", [True, "2000", 0, -1, float("inf")])
 def test_optional_contact_gain_requires_positive_finite_numeric_value(gain):
     from motorhand_teleop.real_hand.force_curves import make_demo_sample

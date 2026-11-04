@@ -434,13 +434,19 @@ class ForceCurvesWindow(QMainWindow):
         now = time.monotonic_ns()
         wuji_age = now - frame["wuji_received_ns"]
         glove_age = now - frame["glove_received_ns"]
-        stale = min(wuji_age, glove_age) < 0 or max(wuji_age, glove_age) > _SOURCE_STALE_NS
+        output_source = frame.get("glove_output_source_ns")
+        output_age = None if output_source is None else now - output_source
+        stale = (min(wuji_age, glove_age) < 0 or max(wuji_age, glove_age) > _SOURCE_STALE_NS
+                 or (output_age is not None and not 0 <= output_age <= _SOURCE_STALE_NS))
         source = "DEMO 合成，非物理仿真" if frame["source"] == "demo" else "硬件遥测"
-        state = "已暂停 · 冻结帧，非当前输出" if self._paused else "同周期显示帧"
+        state = ("已暂停 · 冻结帧，非当前输出" if self._paused else
+                 "异步输出已提交" if output_age is not None and frame["executed"] and frame.get("glove_submit_ns") else
+                 "异步输出样本" if output_age is not None else "同周期显示帧")
         freshness = " · 数据过期／时钟异常，请勿视为当前输出" if stale else ""
+        output_text = "" if output_age is None else f" / 输出源 {output_age / 1e6:.0f}ms"
         self.tau_frame_label.setText(
             f"{source} | {state} | 序号 {frame['sequence']} | 会话 {frame['session_id']}\n"
-            f"源帧龄 Wuji {wuji_age / 1e6:.0f}ms / 手套 {glove_age / 1e6:.0f}ms"
+            f"源帧龄 Wuji {wuji_age / 1e6:.0f}ms / 手套 {glove_age / 1e6:.0f}ms{output_text}"
             f" | 状态 {frame['feedback_state']}{freshness}"
         )
         self.tau_frame_label.setStyleSheet(
@@ -545,9 +551,12 @@ class ForceCurvesWindow(QMainWindow):
         received_age = now - self._received_at_ns
         wuji_age = now - frame["wuji_received_ns"]
         glove_age = now - frame["glove_received_ns"]
-        clock_error = min(wuji_age, glove_age) < 0
+        output_source = frame.get("glove_output_source_ns")
+        output_age = None if output_source is None else now - output_source
+        clock_error = min(wuji_age, glove_age) < 0 or (output_age is not None and output_age < 0)
         stale = (clock_error or received_age > _STALE_NS
-                 or max(wuji_age, glove_age) > _SOURCE_STALE_NS)
+                 or max(wuji_age, glove_age) > _SOURCE_STALE_NS
+                 or (output_age is not None and output_age > _SOURCE_STALE_NS))
         source = "DEMO 合成离线数据" if frame["source"] == "demo" else "硬件遥测"
         executed = "最近周期已发送（不代表当前使能已确认）" if frame["executed"] else "只读计算，未发送"
         state = frame["feedback_state"]
@@ -572,9 +581,10 @@ class ForceCurvesWindow(QMainWindow):
             "waiting_geometry": "受阻估计等待几何刷新",
         }[contact_state]
         freshness = "时钟异常！" if clock_error else "数据过期／请勿视为当前状态！" if stale else "接收正常"
+        output_text = "" if output_age is None else f" / 异步输出源龄 {output_age / 1e6:.0f}ms"
         self.status_label.setText(
             f"{source} | {paused} | {freshness} | 接收距今 {received_age / 1e6:.0f}ms"
-            f" / Wuji帧龄 {wuji_age / 1e6:.0f}ms / 手套帧龄 {glove_age / 1e6:.0f}ms"
+            f" / Wuji帧龄 {wuji_age / 1e6:.0f}ms / 手套帧龄 {glove_age / 1e6:.0f}ms{output_text}"
             f" | 序号 {frame['sequence']} | {executed}\n"
             f"{state_text} | {contact_text} | 映射：{mapping} | 雅可比龄 {jacobian}"
         )

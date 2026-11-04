@@ -166,7 +166,7 @@ def decode_sample(payload: bytes) -> dict:
         raise ValueError("曲线必须明确是否发送控制目标")
     for key, allowed in (
         ("source", ("hardware", "demo")),
-        ("mode", ("glove-to-hand2", "hand2-to-glove")),
+        ("mode", ("glove-to-hand2", "hand2-to-glove", "inference-to-both")),
         ("mapping_mode", ("max_torque_linear_estimate", "contact_impedance_estimate", "calibrated", "disabled")),
         ("feedback_state", ("active", "refreshing_pose", "refreshing_age", "disabled")),
         ("glove_target_unit", ("Nm", "A", None)),
@@ -177,7 +177,7 @@ def decode_sample(payload: bytes) -> dict:
             (type(sample["jacobian_age_ns"]) is not int or sample["jacobian_age_ns"] < 0)):
         raise ValueError("曲线Jac年龄无效")
     for key in ("published_ns", "cycle_started_ns", "cycle_completed_ns",
-                "wuji_submit_ns", "glove_submit_ns"):
+                "wuji_submit_ns", "glove_submit_ns", "glove_output_source_ns"):
         value = sample.get(key)
         if value is not None and (type(value) is not int or value < 0):
             raise ValueError(f"曲线{key}必须为非负整数或缺失值")
@@ -193,14 +193,16 @@ def decode_sample(payload: bytes) -> dict:
             raise ValueError("曲线glove_position_names通道名无效")
     for key, count in (("wuji_position_rad", 20), ("glove_position_rad", 12),
                        ("glove_raw_position_deg", 12), ("wuji_target_rad", 20),
-                       ("glove_target_position_rad", 12)):
+                       ("glove_target_position_rad", 12), ("glove_target_motor_rad", 12)):
         values = sample.get(key)
         if values is not None and (not isinstance(values, list) or len(values) != count or any(
                 value is not None and (type(value) not in (int, float) or _number(value) is None)
                 for value in values)):
             raise ValueError(f"曲线{key}必须为{count}路有限数值或缺失值")
-    if (sample["mode"] != "glove-to-hand2" and sample.get("wuji_target_rad") is not None
-            or sample["mode"] != "hand2-to-glove" and sample.get("glove_target_position_rad") is not None):
+    if (sample["mode"] not in ("glove-to-hand2", "inference-to-both") and sample.get("wuji_target_rad") is not None
+            or sample["mode"] not in ("hand2-to-glove", "inference-to-both") and (
+                sample.get("glove_target_position_rad") is not None
+                or sample.get("glove_target_motor_rad") is not None)):
         raise ValueError("曲线位置目标与跟随方向不一致")
     for key, count in (("wuji_joint_names", 20), ("glove_joint_names", 12)):
         names = sample.get(key)
@@ -228,7 +230,7 @@ def decode_sample(payload: bytes) -> dict:
     if sample["glove_target_unit"] != "Nm" and any(
             value is not None for value in sample.get("glove_projected_torque_nm", [])):
         raise ValueError("曲线投影名义Nm只能伴随Nm输出")
-    if sample["mode"] != "glove-to-hand2" and any(
+    if sample["mode"] not in ("glove-to-hand2", "inference-to-both") and any(
             value is not None for value in sample.get("wuji_tracking_error_rad", [])):
         raise ValueError("反向跟随不能报告Wuji位置目标误差")
     gain = sample.get("contact_reflection_gain")

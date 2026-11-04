@@ -73,6 +73,29 @@ class BridgeTests(unittest.TestCase):
         result = dict(bridge.diagnostics(packet(wuji_submit_ns=NOW-40_000_000), NOW))
         self.assertNotIn('glove_sample_to_wuji_submit_s', result)
 
+    def test_asynchronous_motor_target_uses_its_own_source_time(self):
+        sample = packet(mode='hand2-to-glove', wuji_target_rad=None,
+                        wuji_received_ns=NOW-5_000_000,
+                        glove_submit_ns=NOW-10_000_000,
+                        glove_output_source_ns=NOW-25_000_000,
+                        glove_target_motor_rad=[0.1]*12)
+        topics = {item[0]: item for item in bridge.fields(sample, NOW)}
+        self.assertEqual(topics['glove_target_motor_rad'][1][0], 'q0_motor')
+        self.assertEqual(topics['glove_target_motor_rad'][3], NOW-10_000_000)
+        self.assertNotIn('glove_target_position_rad', topics)
+        timing = dict(bridge.diagnostics(sample, NOW))
+        self.assertAlmostEqual(timing['feedback_source_to_glove_submit_s'], .015)
+        self.assertNotIn('wuji_sample_to_glove_submit_s', timing)
+
+    def test_inference_mode_publishes_both_device_targets(self):
+        sample = packet(mode='inference-to-both', glove_submit_ns=NOW-10_000_000,
+                        glove_output_source_ns=NOW-25_000_000,
+                        glove_target_motor_rad=[0.1]*12)
+        self.assertTrue(bridge.SessionGate().accept(sample, NOW))
+        topics = {item[0] for item in bridge.fields(sample, NOW)}
+        self.assertIn('wuji_target_rad', topics)
+        self.assertIn('glove_target_motor_rad', topics)
+
     def test_known_delay_low_excitation_and_gaps(self):
         lag = bridge.LagEstimator()
         def signal(t):
