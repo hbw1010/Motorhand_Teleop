@@ -31,14 +31,29 @@ pixi run -e hardware wuji-discover
 | --- | --- | --- |
 | 检查模型与资产 | `pixi run validate-assets` | 离线，只读 |
 | 模拟双手演示 | `pixi run mujoco-viewer` | 不连接真机；自动演示轨迹 |
-| 观察手套输入映射 | `pixi run -e hardware encos-live-viewer` | 只读手套并驱动仿真；无位置/MIT 目标 |
-| 五指逐组标零 | `pixi run -e hardware encos-zero-step` | 摆好每指按回车；只更新本项目软件标定，不执行回零 |
+| 手套标零及观察 | 见下方「手套标零与实时可视化」 | 先标零，再只读观察 |
 | 一键回零 | `pixi run -e hardware encos-home` | 使能并伺服回零 |
 | 手套遥操作 Wuji | `pixi run -e hardware wuji-teleop` | Wuji 运动；手套只读 |
 | 接触估计力反馈 | `pixi run -e hardware wuji-force-contact` | 两侧使能，手套先回零；终端显示名义前馈 |
 | 力反馈曲线窗口 | `pixi run -e hardware force-ui` | 只读本机 UDP，不控制设备 |
 
-只读手套轮询含协议 0 A 探针，不等于总线完全不发报文。单指重标可用 `encos-zero-index`、`encos-zero-middle`、`encos-zero-ring`、`encos-zero-pinky`；如需拇指，用 `pixi run -e hardware encos-zero-step -- --finger thumb`。默认只修改本项目的标定，不再自动修改其他工程。
+### 手套标零与实时可视化
+
+连接手套并保持电机失能，确认 12 轴全部在线，再依次运行：
+
+```bash
+# 五指逐组标零
+pixi run -e hardware encos-zero-step
+
+# 标零完成后，用手套实测输入驱动 MuJoCo 模型
+pixi run -e hardware encos-live-viewer
+```
+
+标零时按提示依次摆好拇指（J1–J4）、食指（J5–J6）、中指（J7–J8）、无名指（J9–J10）和小拇指（J11–J12），每摆好一指按回车确认。每次确认立即保存该指零位，全部完成显示 `ZERO_STEP_OK`；中断不会撤销已保存的手指。标定更新 `hardware/encos_dexhand/configs/` 下的 `glove_mapping.json` 和 `joint_calibration.json`；软限位随零位平移，相对范围不变。标零不发送位置或 MIT 目标，不执行回零。
+
+可视化窗口同时显示手套和 Wuji Hand 2 仿真模型；逐指移动手套，检查零位、运动方向和对应关系。关闭窗口或按 `Ctrl+C` 退出。它不控制 Wuji 真机，也不发送手套位置或 MIT 目标；只读轮询含协议 0 A 探针，并非总线完全不发报文。
+
+单指重标可用 `encos-zero-index`、`encos-zero-middle`、`encos-zero-ring`、`encos-zero-pinky`；如需拇指，用 `pixi run -e hardware encos-zero-step -- --finger thumb`。默认只修改本项目的标定，不同步其他工程。
 
 ### 录制、回放和按键接管
 
