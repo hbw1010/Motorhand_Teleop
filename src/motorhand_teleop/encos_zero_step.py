@@ -1,7 +1,6 @@
-"""按手指分组、回车确认的Encos软件零位标定工具。
+"""Encos软件零位标定：全手一键或按手指确认，成功后打开实时观察器。
 
 该工具只读取反馈并记录 zero_deg，不发送位置/MIT目标，也不固化电机硬件零位。
-默认依次标五指；--finger可只标一指，--sync-mapping同步另一项目的同一指。
 """
 
 from __future__ import annotations
@@ -53,7 +52,7 @@ def _validate_mapping(data: Mapping[str, Any]) -> None:
 def _write_calibration(
     mapping_path: Path,
     mapping: dict[str, Any],
-    finger_key: str,
+    finger_keys: tuple[str, ...],
     values: Mapping[int, float],
 ) -> None:
     for motor_id, zero_deg in values.items():
@@ -63,7 +62,7 @@ def _write_calibration(
         config["max_deg"] = float(zero_deg) + (float(config["max_deg"]) - old_zero)
         config["zero_deg"] = float(zero_deg)
     completed = set(mapping.get("zero_calibrated_fingers", []))
-    completed.add(finger_key)
+    completed.update(finger_keys)
     mapping["zero_calibrated_fingers"] = [
         name for name, _, _ in FINGER_GROUPS if name in completed
     ]
@@ -90,9 +89,11 @@ def _write_calibration(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Encos按手指逐组回车确认软件零位")
+    parser = argparse.ArgumentParser(description="Encos一键全手或逐指软件零位标定")
     parser.add_argument("--mapping", type=Path, default=_DEFAULT_MAPPING)
-    parser.add_argument("--finger", choices=[name for name, _, _ in FINGER_GROUPS])
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--all", action="store_true", help="立即用12轴当前反馈标零")
+    mode.add_argument("--finger", choices=[name for name, _, _ in FINGER_GROUPS])
     parser.add_argument("--sync-mapping", type=Path, action="append", default=[])
     return parser
 
@@ -169,10 +170,18 @@ def main(argv: list[str] | None = None) -> int:
             raise RuntimeError(f"标零前存在电机报警: {errors}")
 
         print("只记录软件zero_deg；不会发送位置/MIT命令，也不会固化硬件零位。")
-        print("请保持手套电机失能；摆好当前手指零位后直接按Enter确认。")
-        for finger_key, finger_name, motor_ids in groups:
+        if args.all:
+            print("请保持手套电机失能；立即采集12轴当前反馈作为零位。")
+            captures = [(tuple(group[0] for group in groups), "全手", MOTOR_IDS)]
+        else:
+            print("请保持手套电机失能；摆好当前手指零位后直接按Enter确认。")
+            captures = [((key,), name, ids) for key, name, ids in groups]
+        for finger_keys, finger_name, motor_ids in captures:
             print(f"\n[{finger_name}] ID {motor_ids}")
-            captured = _wait_for_enter(hand, finger_name, motor_ids)
+            if args.all:
+                captured = dict(hand.get_all_angles())
+            else:
+                captured = _wait_for_enter(hand, finger_name, motor_ids)
             values: dict[int, float] = {}
             for motor_id in motor_ids:
                 value = captured.get(motor_id)
@@ -180,11 +189,10 @@ def main(argv: list[str] | None = None) -> int:
                     raise RuntimeError(f"ID {motor_id}确认后缺少有效角度反馈")
                 values[motor_id] = float(value)
             for path, mapping in mappings:
-                _write_calibration(path, mapping, finger_key, values)
+                _write_calibration(path, mapping, finger_keys, values)
             print(f"已保存{finger_name} zero_deg: {values}")
 
         print("ZERO_STEP_OK")
-        return 0
     except KeyboardInterrupt:
         print("ZERO_STEP_ABORTED_BY_USER")
         return 130
@@ -196,6 +204,18 @@ def main(argv: list[str] | None = None) -> int:
                 except BaseException:
                     pass
         hand.close()
+
+    try:
+        from .encos_live_viewer import run_live_viewer
+
+        print("零位已保存；正在打开手套与Wuji仿真观察器。", flush=True)
+        run_live_viewer(mapping_path=args.mapping.resolve())
+    except KeyboardInterrupt:
+        print("LIVE_VIEWER_STOPPED")
+    except Exception as error:
+        print(f"零位已保存，但无法打开观察器：{error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

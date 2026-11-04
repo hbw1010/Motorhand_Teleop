@@ -80,10 +80,25 @@ def _hand_joint_for_glove(glove_joint: str) -> str:
     return f"r_{prefix}_{joint}"
 
 
-def run_live_viewer(project_root: str | Path = _DEFAULT_ROOT) -> None:
+def _wait_for_viewer_shutdown(viewer) -> None:
+    # MuJoCo close() 只请求退出；弱引用在渲染线程和 GLFW 清理完成前仍有效。
+    # 等待清理结束，避免 Python 退出时与渲染线程竞争。
+    renderer_ref = getattr(viewer, "_sim", None)
+    if not callable(renderer_ref):
+        return
+    deadline = time.monotonic() + 5.0
+    while renderer_ref() is not None:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("MuJoCo观察器渲染线程未及时退出")
+        time.sleep(0.01)
+
+
+def run_live_viewer(
+    project_root: str | Path = _DEFAULT_ROOT, *, mapping_path: str | Path | None = None,
+) -> None:
     root = Path(project_root)
     driver = EncosGloveHardwareDriver(
-        hand="right", asset_root=root / "assets" / "hand_motor_ve33",
+        hand="right", asset_root=root / "assets" / "hand_motor_ve33", config_path=mapping_path,
     )
     pipeline = GloveWujiRetargetPipeline.from_yaml(
         "right",
@@ -112,12 +127,11 @@ def run_live_viewer(project_root: str | Path = _DEFAULT_ROOT) -> None:
     data = mujoco.MjData(model)
 
     driver.connect()
-    found = driver.scan()
-    if driver.online_ids != tuple(range(1, 13)):
-        driver.close()
-        raise RuntimeError(f"要求12轴在线，当前online_ids={driver.online_ids}，scan={found}")
-
+    viewer = None
     try:
+        found = driver.scan()
+        if driver.online_ids != tuple(range(1, 13)):
+            raise RuntimeError(f"要求12轴在线，当前online_ids={driver.online_ids}，scan={found}")
         print("实时只读MuJoCo观察器已连接Encos；不会发送位置/MIT命令。", flush=True)
         print(f"腕部换基几何残差={geometry_rms * 1000.0:.2f} mm", flush=True)
         print("移动一根真实手指，观察MuJoCo手套和Hand2模型方向；Ctrl+C退出。", flush=True)
@@ -160,19 +174,24 @@ def run_live_viewer(project_root: str | Path = _DEFAULT_ROOT) -> None:
                     last_report = now
                 time.sleep(0.01)
     finally:
-        driver.close()
+        try:
+            driver.close()
+        finally:
+            if viewer is not None:
+                _wait_for_viewer_shutdown(viewer)
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Encos实时反馈驱动MuJoCo方向观察器")
     parser.add_argument("--project-root", type=Path, default=_DEFAULT_ROOT)
+    parser.add_argument("--mapping", type=Path, default=None)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        run_live_viewer(args.project_root)
+        run_live_viewer(args.project_root, mapping_path=args.mapping)
     except KeyboardInterrupt:
         print("LIVE_VIEWER_STOPPED", flush=True)
     return 0
