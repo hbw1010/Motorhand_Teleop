@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import fcntl
 import hashlib
 import json
 from pathlib import Path
@@ -54,7 +55,8 @@ class TrajectoryRecorder:
     """Single-producer bounded recorder. Disk I/O is confined to its writer thread.
 
     Duplicate source frames are ignored; out-of-order frames and queue/write errors
-    invalidate the recording. close() commits a footer; abort() never does.
+    invalidate the recording. Existing files are overwritten; concurrent writers
+    are rejected. close() commits a footer; abort() never does.
     """
     def __init__(self, path, *, hand, serial_number, firmware_version, queue_size=1024):
         _identity(hand, serial_number, firmware_version)
@@ -62,7 +64,14 @@ class TrajectoryRecorder:
             raise ValueError("queue_size must be positive")
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = path.open("xb")
+        self._file = path.open("a+b")
+        try:
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._file.seek(0)
+            self._file.truncate()
+        except BaseException:
+            self._file.close()
+            raise
         self._queue = queue.Queue(maxsize=queue_size)
         self._error = None
         self._closed = False

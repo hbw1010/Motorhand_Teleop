@@ -540,7 +540,7 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--rate", type=float, default=None, help="循环目标频率Hz：手套→Wuji默认50，Wuji→手套默认20")
             command.add_argument("--duration", type=float, default=0.0, help="秒；0表示运行到Ctrl-C")
             command.add_argument("--transition", type=float, default=0.5, help="五次平滑过渡秒数")
-            command.add_argument("--record", type=Path, help="异步录制Wuji真实状态到新JSONL文件（不会覆盖）")
+            command.add_argument("--record", type=Path, help="异步录制Wuji真实状态到JSONL（同名文件立即覆盖）")
             command.add_argument("--curves-port", type=int, default=None,
                                  help="旁路发送曲线到本机UDP端口；不启动UI，不改变控制目标")
             command.add_argument("--torque-only", action="store_true",

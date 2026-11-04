@@ -57,10 +57,27 @@ def test_measured_frames_interpolation_and_metadata(tmp_path):
     np.testing.assert_allclose(trajectory.positions_at(200), np.full(20, 5))
 
 
-def test_existing_file_and_aborted_recording(tmp_path):
+def test_completed_trajectory_is_overwritten_and_replayable(tmp_path):
+    path = tmp_path / "trajectory.jsonl"
+    first = recorder(path)
+    first.record(state(100, 1), np.zeros(20))
+    first.record(state(200, 2), np.zeros(20))
+    first.close()
+
+    second = recorder(path)
+    second.record(state(300, 7), np.zeros(20))
+    second.record(state(500, 9), np.zeros(20))
+    second.close()
+
+    trajectory = RecordedTrajectory.load(path)
+    assert trajectory.duration_ns == 200
+    np.testing.assert_allclose(trajectory.positions_rad, np.array([[7] * 20, [9] * 20]))
+
+
+def test_concurrent_recorder_rejected_and_aborted_recording_unplayable(tmp_path):
     path = tmp_path / "trajectory.jsonl"
     writer = recorder(path)
-    with pytest.raises(FileExistsError):
+    with pytest.raises(BlockingIOError):
         recorder(path)
     writer.record(state(100, 1), np.zeros(20))
     writer.abort()
@@ -131,6 +148,9 @@ def test_queue_overflow_fails_and_never_commits(tmp_path, monkeypatch):
     class BlockedFile:
         def __init__(self, wrapped):
             self.wrapped = wrapped
+        def __getattr__(self, name):
+            return getattr(self.wrapped, name)
+
 
         def write(self, data):
             opened.set()
@@ -145,7 +165,7 @@ def test_queue_overflow_fails_and_never_commits(tmp_path, monkeypatch):
 
     def open_blocked(path, mode="r", *args, **kwargs):
         file = original_open(path, mode, *args, **kwargs)
-        return BlockedFile(file) if mode == "xb" else file
+        return BlockedFile(file) if mode == "a+b" else file
 
     monkeypatch.setattr(Path, "open", open_blocked)
     path = tmp_path / "overflow.jsonl"
@@ -222,6 +242,10 @@ def test_follow_cli_commits_only_on_clean_interrupt(tmp_path, monkeypatch, endin
     monkeypatch.setattr(runtime, "create_retargeter", lambda **kwargs: object())
     monkeypatch.setattr(runtime.time, "sleep", lambda _: None)
     path = tmp_path / "cli.jsonl"
+    previous = recorder(path)
+    previous.record(state(10, -1), np.zeros(20))
+    previous.record(state(20, -2), np.zeros(20))
+    previous.close()
     args = ["follow", "--mode", "glove-to-hand2", "--wuji-serial", "serial", "--record", str(path)]
     if playable:
         assert runtime.main(args) == 130

@@ -65,7 +65,7 @@ pixi run -e hardware encos-zero-step
 ### 录制、回放和按键接管
 
 ```bash
-# 手套遥操作 Wuji 并录制实测状态；Ctrl+C 完成文件，已有文件不会覆盖
+# 手套遥操作 Wuji 并录制实测状态；同名文件会被覆盖
 pixi run -e hardware wuji-record -- recordings/demo.jsonl
 
 # 仅校验轨迹文件；不连接设备
@@ -77,6 +77,8 @@ pixi run -e hardware wuji-replay -- recordings/demo.jsonl --execute
 # Wuji 回放，手套跟随实际姿态并可接管；会先回零手套、使能两侧
 pixi run -e hardware wuji-takeover -- recordings/demo.jsonl
 ```
+
+录制初始化时立即覆盖同名文件，旧数据不会保留；启动失败或中途异常也不会恢复旧文件。不要让多个录制进程同时写同一文件。
 
 默认 `--speed 1.0`、50 Hz、启动及切换过渡 0.5 s。回放身份、固件和关节限位在使能前核验；轨迹保存原始采样时间、位置、速度、电流和发送目标，带完整性校验。手套逆解的数据超期时暂停轨迹并等待新鲜结果，不延长原始 100 ms 期限；持续无解会停止。回放过程按 **T 或空格**切换手套接管/恢复，按 **Q** 退出。人工接管暂停轨迹，手套跟随停止，力反馈接管开始；恢复时从暂停位置平滑衔接。
 
