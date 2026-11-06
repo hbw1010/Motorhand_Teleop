@@ -72,6 +72,7 @@ struct WujiRetarget::Impl {
     bool thumb_skip;
     std::array<std::array<double, 3>, 5> segment{};
     std::array<double, 4> d1{}, d2{};
+    double pinch_weight_max = 0.7;  // retarget.pinch_weight_max: the cap on a finger's pinch weight
     std::array<V3, 5> target_tip{}, target_dir{};
     std::array<std::array<V3, 3>, 5> target_full{};
     std::array<double, 5> alpha{};
@@ -157,6 +158,9 @@ struct WujiRetarget::Impl {
         w_couple = option<double>(ret, "w_couple", 0.0);
         couple_ratio = option<double>(ret, "couple_ratio", 0.7);
         thumb_skip = option<bool>(ret, "thumb_skip_pip", false);
+        pinch_weight_max = option<double>(ret, "pinch_weight_max", 0.7);
+        if (!std::isfinite(pinch_weight_max) || pinch_weight_max <= 0 || pinch_weight_max > 1)
+            throw std::runtime_error("pinch_weight_max must be in (0, 1]");
         const auto scales = ret ? ret["segment_scaling"] : YAML::Node();
         const auto thresholds = ret ? ret["pinch_thresholds"] : YAML::Node();
         for (int i = 0; i < 5; ++i) {
@@ -283,7 +287,7 @@ struct WujiRetarget::Impl {
         }
         for (int i = 1; i < 5; ++i) {
             const double distance = 100.0 * (p[4 + 4*i] - p[4]).norm();
-            alpha[i] = std::clamp((d2[i-1] - distance) / (d2[i-1] - d1[i-1] + eps), 0.0, 0.7);
+            alpha[i] = std::clamp((d2[i-1] - distance) / (d2[i-1] - d1[i-1] + eps), 0.0, pinch_weight_max);
         }
         alpha[0] = *std::max_element(alpha.begin() + 1, alpha.end());
         for (int i = 0; i < 5; ++i) {

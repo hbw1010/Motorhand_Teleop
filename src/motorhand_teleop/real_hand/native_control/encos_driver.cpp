@@ -156,6 +156,8 @@ struct EncosDriver::Impl {
     mutable std::mutex mutex;
     std::condition_variable command_changed;
     std::atomic<bool> running{false};
+    std::atomic<long long> slot_us{5000};  // set_slot
+    double position_kp = 45.0;             // set_position_kp, under mutex
     std::string channel_error;
 
     Impl(const std::string& mapping_path, const std::string& limits_path) {
@@ -277,7 +279,12 @@ struct EncosDriver::Impl {
         for (int i = 0; i < 12; ++i) {
             const auto& f = feedback[i]; const auto& m = motors[i];
             if (!f.stamp || f.stamp > now || now - f.stamp > feedback_age || f.error || !std::isfinite(f.angle) || !std::isfinite(f.current))
-                throw std::runtime_error("Encos motor " + std::to_string(i+1) + " stale, missing, invalid or faulted");
+                throw std::runtime_error("Encos motor " + std::to_string(i+1) + " stale, missing, invalid or faulted: " +
+                    (f.error ? "error code " + std::to_string(f.error)
+                     : !f.stamp ? std::string("never answered")
+                     : f.stamp > now ? std::string("a reading from the future")
+                     : now - f.stamp > feedback_age ? "no answer for " + std::to_string((now - f.stamp) / 1000000) + " ms"
+                     : std::string("a non-finite reading")));
             out.raw_degrees[m.index] = f.angle;
             out.motor_rad[m.index] = (f.angle - m.zero) * m.factor * pi / 180.0;
             out.measured_current_a[m.index] = f.current;
@@ -327,7 +334,7 @@ struct EncosDriver::Impl {
         try {
             std::size_t slot = 0;
             while (running.load()) {
-                auto end = Clock::now() + std::chrono::milliseconds(5);
+                auto end = Clock::now() + std::chrono::microseconds(slot_us.load());
                 int id = ch.ids[slot]; slot = (slot + 1) % ch.ids.size();
                 {
                     std::lock_guard<std::mutex> lock(mutex);
@@ -514,6 +521,26 @@ void EncosDriver::home(double tolerance_rad, double timeout_s) {
     } catch (...) { disable(); throw; }
 }
 
+void EncosDriver::mark_homed() {
+    auto& d = *impl_; std::lock_guard<std::mutex> lock(d.mutex);
+    d.require_calibrated(); d.require_unlatched(); d.frame_locked();
+    if (d.submitting) throw std::runtime_error("Encos frame submission in progress");
+    for (const auto& m : d.motors)
+        if (m.zero < m.min || m.zero > m.max) throw std::runtime_error("Encos zero outside soft limits");
+    d.homed = true; d.force = false;
+}
+
+void EncosDriver::set_slot(std::chrono::microseconds slot) {
+    if (slot.count() <= 0 || slot > std::chrono::milliseconds(100)) throw std::invalid_argument("Invalid Encos CAN slot");
+    impl_->slot_us.store(slot.count());
+}
+std::chrono::microseconds EncosDriver::slot() const { return std::chrono::microseconds(impl_->slot_us.load()); }
+void EncosDriver::set_position_kp(double kp) {
+    if (!std::isfinite(kp) || kp <= 0 || kp > 500) throw std::invalid_argument("Invalid Encos position kp");
+    std::lock_guard<std::mutex> lock(impl_->mutex); impl_->position_kp = kp;
+}
+double EncosDriver::position_kp() const { std::lock_guard<std::mutex> lock(impl_->mutex); return impl_->position_kp; }
+
 void EncosDriver::enable_force() {
     auto& d = *impl_;
     std::lock_guard<std::mutex> lock(d.mutex);
@@ -543,7 +570,7 @@ Vec12 EncosDriver::write_position(const Vec12& position, std::uint64_t deadline_
         code = std::clamp(code, low_code, high_code);
         double commanded = -5.0 + code * 10.0 / 65535.0;
         actual[m.index] = (commanded - m.zero * pi / 180.0) * m.factor;
-        next[i] = {mit(code, 45.0, 0.5, 2048), deadline_ns, true};
+        next[i] = {mit(code, d.position_kp, 0.5, 2048), deadline_ns, true};
     }
     d.force = false; d.owned = true; d.submit_and_wait(next, deadline_ns, lock);
     return actual;

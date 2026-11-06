@@ -64,6 +64,7 @@ retarget:
     middle: { d1: 2.0, d2: 4.0 }
     ring:   { d1: 2.0, d2: 4.0 }
     pinky:  { d1: 2.0, d2: 4.0 }
+  pinch_weight_max: 0.7   # 对指权重上限（C++ WujiRetarget 读；vendor 里的 Python 版固定 0.7）
   # vE3.3 任务点由适配器先转成官方 canonical 掌坐标；不再叠加相机设备旋转。
   mediapipe_rotation:
     x: 0.0

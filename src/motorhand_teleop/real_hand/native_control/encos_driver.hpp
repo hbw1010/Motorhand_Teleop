@@ -1,6 +1,7 @@
 #pragma once
 
 #include "types.hpp"
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -43,6 +44,9 @@ public:
     // Monotonic timestamps after serial submission, indexed in GLOVE_JOINTS order.
     std::array<std::uint64_t, 12> last_command_write_ns() const;
     void home(double tolerance_rad = 0.15, double timeout_s = 45.0);
+    // Treat the glove as homed without moving it: it was homed earlier (a reconnect after a motor fault resumes
+    // from where the hand is instead of dragging it back to zero). Same checks as home(), no output acquired.
+    void mark_homed();
     void enable_force();
     Vec12 write_position(const Vec12& motor_rad, std::uint64_t deadline_ns);
     Vec12 write_torque(const Vec12& nominal_nm, std::uint64_t deadline_ns);
@@ -51,6 +55,14 @@ public:
     // Serial submission is not motor acknowledgement or measured torque.
     void disable();
     void close();
+
+    // Settings, defaults unchanged. slot: how long each adapter's thread spends on one motor before asking the
+    // next; with 4 motors an adapter, each is read every 4 x slot (5 ms: 20 ms, readings ~25 ms old; 1 ms: ~4.7 ms).
+    // position_kp: write_position's MIT stiffness, Nm/rad (45: a motor held 9 deg off pushes ~7 Nm all the time).
+    void set_slot(std::chrono::microseconds slot);
+    std::chrono::microseconds slot() const;
+    void set_position_kp(double kp_nm_per_rad);
+    double position_kp() const;
 
 private:
     struct Impl;
