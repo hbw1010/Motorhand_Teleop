@@ -10,7 +10,14 @@ paths:
 simulation:
   timestep_s: 0.001
   physics_hz: 1000.0
-  control_hz: 200.0
+  # Control loop: glove read -> kinematics -> contacts -> torque command.
+  # The Encos CAN worker refreshes each motor every 20 ms (5 ms slot x 4
+  # motors per bus), i.e. 50 Hz per motor; 100 Hz keeps 2x margin.
+  control_hz: 100.0
+  # Max wall time per control tick spent in mj_step.  Under heavy contact the
+  # physics then runs slower than real time instead of stalling the control
+  # loop.  null = old behaviour (catch up with wall time, max 30 steps).
+  physics_budget_ms: 4.0
   ui_hz: 60.0
   gravity: [0.0, 0.0, 0.0]
   # How long a simulated command remains valid.
@@ -53,18 +60,72 @@ glove:
   kd_nm_s_rad: 0.8
   torque_limit_nm: [4.0, 2.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0]
   slew_nm_s: 60.0
+  # Feedback model.
+  #   proxy_spring (default): joint-space virtual spring.  When the real
+  #     finger's target pose touches a locked object, the visible finger stops
+  #     at the surface and each blocked motor gets
+  #     tau = -k * (real angle - surface angle) * proxy_gain, i.e. the deeper
+  #     you squeeze, the stronger the push-back.  k comes from the object's
+  #     0..1 hardness, linearly between proxy_stiffness_nm_per_rad[0..1].
+  #   driver_impedance: the same proxy spring, but run *inside the Encos
+  #     driver* (MIT kp/kd toward the surface angle) instead of as an
+  #     off-board feed-forward torque updated at only ~50 Hz per motor.  Lets
+  #     the wall be 3-4x stiffer without chatter; adds one-sided damping and
+  #     free-space friction compensation.  See glove_sim/impedance.py.
+  #   contact_jacobian: legacy J^T * MuJoCo contact force * feedback_gain.
+  #     With a kinematic glove against a locked object that force depends on
+  #     object mass/timestep rather than depth and vanishes when the target
+  #     passes through the object.
+  feedback_mode: driver_impedance
+  driver_impedance:
+    stiffness_nm_per_rad: [5.0, 60.0]   # object hardness 0..1 -> driver kp (model frame)
+    gain: 1.0                 # UI slider "反馈强度" in this mode, 0..2
+    # kd = damping_s * kp in contact (kp 60 -> kd 0.48).  Damping is what
+    # keeps the wall from ringing: J4 test (1.2-2 Nm emulated press, kp 60-80)
+    # oscillated 1.5-5 deg p-p at 0-0.004, settled with 0 p-p at 0.008.
+    damping_s: 0.008
+    damping_max: 0.5
+    k_max_nm_per_rad: 80.0
+    release_lookahead_s: 0.02 # moving out: aim the spring this far ahead; 0.04 rang (velocity lag)
+    rebound_mode: soften      # soften (smooth, no pull-back) | release (legacy hard kp=0; chattered at contact)
+    damping_off_velocity_rad_s: 0.15  # damping stays on in contact until a clear withdrawal (> ~9 deg/s)
+    damping_on_velocity_rad_s: 0.05
+    torque_margin: 0.85       # spring target clamped to 85% of torque_limit_nm
+  # Kinetic-friction feed-forward in free space (driver_impedance mode only).
+  # Measured with the glove off: kinetic friction 0.6-1.0 Nm at 5-10 deg/s,
+  # J2 (thumb abduction) ~0.1 Nm in one direction.  Start well below that;
+  # over-compensation makes a joint drift on its own.  UI slider "摩擦补偿 ×".
+  friction_comp:
+    enabled: true
+    coulomb_nm: [0.25, 0.10, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25]
+    viscous_nm_s_per_rad: 0.0
+    velocity_scale_rad_s: 0.08   # tanh smoothing: full compensation above ~5 deg/s
+    velocity_deadband_rad_s: 0.02  # ~1 deg/s: no assist at rest
+    gain: 1.0
+    max_nm: 0.6
+  velocity_filter_hz: 12.0
+  proxy_stiffness_nm_per_rad: [2.0, 20.0]
+  proxy_gain: 0.5           # start conservative on hardware; UI slider 0..3
   feedback_gain: 10.0       # Nm per N at the contact, before limits; tune offline
   feedback_filter_hz: 25.0
   feedback_deadband_nm: 0.01
   feedback_ramp_s: 0.15
+  fast_kinematics: true     # vectorized closed-chain solver; false = reference scipy solver
   # Collision-aware kinematic motion.  The CAD glove is driven kinematically,
   # so without a guard a commanded finger can pass straight through a locked
   # object.  The visible pose is clamped per finger when the target pose hits a
   # locked object; feedback torque still uses the unclamped target pose.
   collision_clamp: true
+  # Glove collision geometry: mesh = the visible CAD parts (convex hull each,
+  # what you see is what touches); spheres = legacy 17 hand-placed proxies
+  # (they sat on the dorsal housings and missed the palm-side finger rings).
+  collision_geometry: mesh
+  release_margin_rad: 0.01    # contact is released only ~0.6 deg outside the surface (hysteresis)
+  stale_release_clearance_m: 0.01  # unlock a held finger once no object is within ~1 cm of it
   clamp_soft_allow_m: 0.0     # 0 = no visible penetration; unlock to squeeze the flex ball
-  # Per-motor torque direction.  Defaults are a nominal +1; verify each axis
-  # on hardware before trusting the haptic direction.
+  # Per-motor torque direction.  Verified on hardware 2026-11-10: positive MIT
+  # torque increases the raw encoder angle on all 12 motors (+1).  The MIT
+  # position frame equals the reported angle on all 12 motors.
   torque_sign: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
   release_torque_nm: 0.0
 
@@ -120,6 +181,9 @@ objects:
       deformable: false
       position: [0.285, -0.060, 0.115]
   size_range_m: [0.025, 0.070]
+  # Per-shape override of size_range_m (diameter / edge length, metres).
+  size_range_m_by_shape:
+    sphere: [0.025, 0.200]
   stiffness_range: [0.0, 1.0]
   # Stiffness mapping: 0 = very soft (solref max), 1 = rigid (solref min).
   solref_range_s: [0.010, 0.060]

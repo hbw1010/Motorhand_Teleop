@@ -70,7 +70,8 @@ class Simulation:
         self.model: mujoco.MjModel
         self.data: mujoco.MjData
         model_dir = Path(config["paths"]["glove_model"]).parent
-        self.kinematics = GloveKinematics(model_dir, mapping)
+        self.kinematics = GloveKinematics(
+            model_dir, mapping, fast=bool(config.get("glove", {}).get("fast_kinematics", True)))
         self._motor_rad = np.zeros(12, dtype=float)
         self._visual_motor_rad = np.zeros(12, dtype=float)
         self._q_tree = np.zeros(len(self.kinematics.joint_names), dtype=float)
@@ -97,7 +98,10 @@ class Simulation:
         self._motor_target = np.zeros(12, dtype=float)
         self._prev_motor_target = np.zeros(12, dtype=float)
         self._q_tree_target = self._q_tree.copy()
-        self._blocked: dict[int, tuple[int, float]] = {}
+        # Joint-space proxy ("god object"): motor idx -> (closing sign,
+        # surface angle where the target first touched a locked object,
+        # virtual stiffness Nm/rad of that object).
+        self._blocked: dict[int, tuple[int, float, float]] = {}
         self._ghost_data = mujoco.MjData(self.model)
         self._ghost_contacts: list[ContactInfo] | None = None
         self._ghost_finger_force = {k: 0.0 for k in CONTACT_GROUPS}
@@ -163,11 +167,16 @@ class Simulation:
         self.motor_dofadr = np.asarray([self.model.jnt_dofadr[i] for i in self.motor_ids], dtype=int)
         self.glove_geoms: dict[int, str] = {}
         for gid in range(self.model.ngeom):
+            if self.model.geom_contype[gid] != 1:
+                continue  # only geoms that actually collide with objects
             name = self.model.geom(gid).name
             if name.startswith("col_"):
                 parts = name.split("_", 2)
                 if len(parts) >= 2:
                     self.glove_geoms[gid] = parts[1]
+            elif self.model.geom_type[gid] == mujoco.mjtGeom.mjGEOM_MESH:
+                body = self.model.body(self.model.geom_bodyid[gid]).name
+                self.glove_geoms[gid] = next((f for f in FINGERS if body.startswith(f)), "palm")
         self.object_runtime: list[ObjectRuntime] = []
         for spec in self.specs:
             jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, f"obj_{spec.name}_free")
@@ -236,6 +245,7 @@ class Simulation:
         t0 = time.perf_counter()
         try:
             self._q_tree = self.kinematics.full_pose(self._motor_rad, self.model, self.mapping)
+            self.kinematics.copy_slot("target", "visual")
         except KinematicsError:
             # Keep the last valid pose; the telemetry/UI reports the error.
             return
@@ -251,17 +261,22 @@ class Simulation:
         if not self.collision_clamp or not self.objects_locked:
             self._blocked.clear()
         else:
-            for idx, (sign, frozen) in list(self._blocked.items()):
-                if abs(delta[idx]) < 1e-12:
+            margin = float(self.config.get("glove", {}).get("release_margin_rad", 0.01))
+            for idx, (sign, frozen, _k) in list(self._blocked.items()):
+                # Hold the visible finger at the surface while the real finger
+                # is beyond it; release only once the real finger has backed
+                # out past the surface.  (The old rule used the per-frame
+                # direction, so encoder noise made the visible finger jump
+                # between the surface and the inside of the object.)
+                inside = sign * (target[idx] - frozen)
+                if inside > 0.0:
                     cmd[idx] = frozen
-                elif int(np.sign(delta[idx])) == sign:
-                    cmd[idx] = frozen
-                else:
-                    # The wearer is opening/backing off this axis.  Allow the
-                    # retreat but keep the block until the contact disappears,
-                    # otherwise a still-touching finger gets re-blocked while
-                    # opening and becomes stuck.
-                    cmd[idx] = target[idx]
+                elif inside < -margin:
+                    del self._blocked[idx]
+                # else: just outside -- the visible finger follows the real one
+                # and the spring is 0, but the surface is kept, so a re-press
+                # meets the same wall instead of re-freezing a new one (the
+                # release/re-engage switching made contact chatter).
         target_changed = not np.array_equal(target, previous)
         self._prev_motor_target = previous.copy()
         self._motor_target = target.copy()
@@ -274,11 +289,12 @@ class Simulation:
                 target_pose = self._q_tree_target
             if np.array_equal(cmd, target):
                 pose = target_pose
+                self.kinematics.copy_slot("target", "visual")
             elif np.array_equal(cmd, self._visual_motor_rad):
                 # Contact clamp held the visible pose; no second CAD solve.
                 pose = self._q_tree
             else:
-                pose = self.kinematics.full_pose(cmd, self.model, self.mapping)
+                pose = self.kinematics.full_pose(cmd, self.model, self.mapping, slot="visual")
         except KinematicsError:
             # Keep the last valid pose; the telemetry/UI reports the error.
             return
@@ -293,14 +309,13 @@ class Simulation:
     def _refresh_visual_pose(self) -> None:
         """Recompute the displayed hand pose after contact blocks changed."""
         cmd = self._motor_target.copy()
-        for idx, (sign, frozen) in self._blocked.items():
-            delta = self._motor_target[idx] - self._prev_motor_target[idx]
-            if abs(delta) < 1e-12 or int(np.sign(delta)) == sign:
+        for idx, (sign, frozen, _k) in self._blocked.items():
+            if sign * (cmd[idx] - frozen) > 0.0:
                 cmd[idx] = frozen
         if np.array_equal(cmd, self._visual_motor_rad):
             return
         try:
-            pose = self.kinematics.full_pose(cmd, self.model, self.mapping)
+            pose = self.kinematics.full_pose(cmd, self.model, self.mapping, slot="visual")
         except KinematicsError:
             return
         self._motor_rad = cmd
@@ -309,23 +324,28 @@ class Simulation:
         self._apply_pose()
 
     def _update_contact_blocks(self, contacts: list[ContactInfo]) -> None:
-        """Clamp only fingers whose *target* pose touches a locked object."""
+        """Engage the proxy for fingers whose *target* pose touches a locked object.
+
+        Blocks are only released in update_glove(), when the real finger backs
+        out past the surface.  They are deliberately *not* released when the
+        ghost contact disappears: a target that has been pushed through a
+        locked object loses its contacts, which previously released the clamp
+        and dropped the feedback to zero exactly when squeezing hardest.
+        """
         if not self.collision_clamp or not self.objects_locked:
             self._blocked.clear()
             return
         soft_allow = float(self.config.get("glove", {}).get("clamp_soft_allow_m", 0.004))
-        active: set[str] = set()
+        active: dict[str, float] = {}
         for contact in contacts:
             if contact.object_name == self._drag_name:
                 continue
             spec = next((s for s in self.specs if s.name == contact.object_name), None)
             allowed = soft_allow if (spec is not None and spec.deformable) else 0.0
             if contact.penetration_m > allowed:
-                active.add(contact.finger)
-        for idx in list(self._blocked):
-            if MOTOR_FINGER[idx] not in active:
-                del self._blocked[idx]
-        for finger in active:
+                k = self._proxy_stiffness(spec)
+                active[contact.finger] = max(active.get(contact.finger, 0.0), k)
+        for finger, k in active.items():
             for idx in self._finger_motors.get(finger, ()):
                 direction = self._motor_target[idx] - self._prev_motor_target[idx]
                 # Only block the closing direction.  A contact that appears
@@ -336,7 +356,91 @@ class Simulation:
                 self._blocked[idx] = (
                     int(np.sign(direction)),
                     float(self._prev_motor_target[idx]),
+                    float(k),
                 )
+
+    def _release_stale_blocks(self) -> None:
+        """Drop blocks of fingers whose visible pose is clear of every object.
+
+        Blocks deliberately survive the loss of the ghost contact (squeezing
+        through a locked object).  But when the object itself has gone --
+        dragged away, unlocked, resized or nudged -- the finger stayed locked
+        with no visible contact.  The visible (clamped) finger sits at the
+        surface while legitimately blocked, so a clearance of ~1 cm between
+        conservative bounding spheres only triggers when nothing is there.
+        """
+        if not self._blocked:
+            return
+        clear = float(self.config.get("glove", {}).get("stale_release_clearance_m", 0.01))
+        centres, radii = [], []
+        for obj in self.object_runtime:
+            bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, obj.body_name)
+            if bid < 0:
+                continue
+            centres.append(self.data.xpos[bid])
+            radii.append(self.bounding_radius(obj.spec) + self.object_deformation_margin(obj))
+        if not centres:
+            self._blocked.clear()
+            return
+        centres = np.asarray(centres)
+        radii = np.asarray(radii)
+        for finger, motors in self._finger_motors.items():
+            held = [i for i in motors if i in self._blocked]
+            if not held:
+                continue
+            geoms = [g for g, f in self.glove_geoms.items() if f == finger]
+            if geoms:
+                pos = self.data.geom_xpos[geoms]
+                gap = (np.linalg.norm(pos[:, None, :] - centres[None, :, :], axis=2)
+                       - self.model.geom_rbound[geoms][:, None] - radii[None, :])
+                if float(gap.min()) < clear:
+                    continue
+            for i in held:
+                del self._blocked[i]
+
+    def object_deformation_margin(self, obj: ObjectRuntime) -> float:
+        """Extra radius for soft objects whose surface may bulge (m)."""
+        return 0.005 if obj.spec.deformable else 0.0
+
+    def _proxy_stiffness(self, spec: ObjectSpec | None) -> float:
+        """Virtual joint stiffness (Nm/rad) from the object's 0..1 hardness.
+
+        The driver-side spring runs at the driver rate, so it uses its own
+        (much stiffer) range; the off-board spring keeps the soft range.
+        """
+        glove = self.config.get("glove", {})
+        if self._feedback_mode() == "driver_impedance":
+            lo, hi = glove.get("driver_impedance", {}).get("stiffness_nm_per_rad", [5.0, 60.0])
+        else:
+            lo, hi = glove.get("proxy_stiffness_nm_per_rad", [2.0, 20.0])
+        hardness = 0.5 if spec is None else max(0.0, min(1.0, float(spec.stiffness)))
+        return float(lo) + (float(hi) - float(lo)) * hardness
+
+    def _feedback_mode(self) -> str:
+        return str(self.config.get("glove", {}).get("feedback_mode", "proxy_spring"))
+
+    def contact_blocks(self) -> dict[int, tuple[int, float, float]]:
+        """motor index -> (closing sign, surface angle rad, stiffness Nm/rad)."""
+        return dict(self._blocked)
+
+    def proxy_feedback_torque(self) -> np.ndarray:
+        """Joint-space virtual spring between the real finger and its proxy.
+
+        tau_i = -sign_i * k_i * depth_i * proxy_gain, depth_i = how far the
+        real finger angle is past the surface angle (rad).  Model-joint
+        coordinates (closing = +); converted to motor axes by the SDK wrapper.
+        Nominal torque before caps/slew/filter, not a measured force.
+        """
+        tau = np.zeros(12, dtype=float)
+        glove = self.config.get("glove", {})
+        if self._feedback_mode() == "driver_impedance":
+            gain = float(glove.get("driver_impedance", {}).get("gain", 1.0))
+        else:
+            gain = float(glove.get("proxy_gain", 1.0))
+        for idx, (sign, frozen, k) in self._blocked.items():
+            depth = max(0.0, sign * (float(self._motor_target[idx]) - frozen))
+            tau[idx] = -sign * k * depth * gain
+        return tau
 
     def _refresh_ghost_feedback(self) -> None:
         """Evaluate the unclamped target pose in a private MjData.
@@ -412,6 +516,10 @@ class Simulation:
             if obj is None:
                 continue
             world, normal = self._contact_force(i, data)
+            # mj_contactForce gives the force geom1 exerts on geom2 (normal
+            # points geom1 -> geom2).  Express it as the force on the glove.
+            if glove_gid == g1:
+                world = -world
             finger = self.glove_geoms[glove_gid]
             pen = max(0.0, -float(c.dist))
             contacts.append(
@@ -520,11 +628,17 @@ class Simulation:
         if self._ghost_dirty and self.objects_locked:
             self._refresh_ghost_feedback()
         mujoco.mj_step(self.model, self.data)
+        self._release_stale_blocks()
         if self._use_ghost_feedback():
             contacts = self._ghost_contacts or []
             finger_force = dict(self._ghost_finger_force)
             finger_pen = dict(self._ghost_finger_pen)
-            raw = self._ghost_raw.copy()
+            if self._feedback_mode() in ("proxy_spring", "driver_impedance"):
+                # driver_impedance: the spring runs in the motor driver; this
+                # is its nominal (uncapped) torque, used for display/telemetry.
+                raw = self.proxy_feedback_torque()
+            else:
+                raw = self._ghost_raw.copy()
         else:
             contacts, finger_force, finger_pen = self.compute_contacts()
             raw = self.raw_feedback_torque(contacts)
@@ -708,6 +822,34 @@ class Simulation:
             mujoco.mj_forward(self.model, self.data)
             return
         raise KeyError(name)
+
+    @staticmethod
+    def bounding_radius(spec: ObjectSpec) -> float:
+        """Radius of a sphere that encloses the object (size = diameter/edge)."""
+        factor = {"sphere": 0.5, "box": 0.5 * math.sqrt(3.0), "cylinder": 0.5 * math.sqrt(2.0)}
+        return float(spec.size_m) * factor.get(spec.shape, 0.5 * math.sqrt(3.0))
+
+    def free_position(self, name: str, position: np.ndarray, *, margin_m: float = 0.008,
+                      max_iter: int = 50) -> np.ndarray:
+        """Shift ``position`` sideways (+y) until object ``name`` overlaps no other object.
+
+        Overlapping objects (especially the soft flex ball) create hundreds of
+        object-object contacts and can make one physics step take >50 ms.
+        """
+        spec = next(s for s in self.specs if s.name == name)
+        pos = np.asarray(position, dtype=float).copy()
+        others = [(o, next(s for s in self.specs if s.name == o.name))
+                  for o in self.object_runtime if o.name != name]
+        for _ in range(max_iter):
+            moved = False
+            for obj, other in others:
+                clearance = self.bounding_radius(spec) + self.bounding_radius(other) + margin_m
+                if float(np.linalg.norm(pos - obj.target_position)) < clearance:
+                    pos[1] = float(obj.target_position[1]) + clearance + 1e-4
+                    moved = True
+            if not moved:
+                break
+        return pos
 
     def set_object_shape(self, name: str, *, size_m: float | None = None,
                          stiffness: float | None = None) -> None:

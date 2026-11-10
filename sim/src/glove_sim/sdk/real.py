@@ -30,7 +30,9 @@ class RealGlove:
 
     The wrapper is intentionally conservative: it refuses to enable output
     unless all 12 motors are online, the calibration file is valid, and no
-    motor reports an error.  Torque commands are MIT feed-forward with kp=kd=0.
+    motor reports an error.  ``command_torque`` is MIT feed-forward with
+    kp=kd=0; ``command_impedance`` puts the contact spring/damper on the
+    driver (MIT kp/kd).
     """
 
     def __init__(self, mapping: GloveMapping, *, ports: Mapping[int, str] | None = None,
@@ -129,22 +131,81 @@ class RealGlove:
                     pass
             self._enabled = False
 
-    def command_torque(self, motor_id: int, torque_nm: float, *, deadline_ns: int | None = None) -> None:
+    def motor_axis_torque(self, motor_id: int, torque_nm: float) -> float:
+        """Model-joint torque -> torque about the motor's raw encoder axis.
+
+        model_rad = (raw - zero) * sign * scale, so by virtual work
+        tau_raw = tau_model * sign * scale.  ``torque_sign`` is an additional
+        per-motor correction for "positive MIT torque increases the raw
+        encoder angle" (default +1, verify on hardware).
+        """
+        motor = self.mapping.motors[motor_id - 1]
+        return float(torque_nm) * motor.sign * motor.scale * float(self.torque_sign[motor_id - 1])
+
+    def command_torque(self, motor_id: int, torque_nm: float, *,
+                       deadline_ns: int | None = None) -> float | None:
+        """Returns the MIT feed-forward torque actually queued (motor axis), or None."""
         if self._hand is None or not self._enabled:
-            return
+            return None
         angle = self._last_angles_deg.get(motor_id)
         if angle is None or not math.isfinite(angle):
-            return
-        sign = float(self.torque_sign[motor_id - 1])
+            return None
+        tau = self.motor_axis_torque(motor_id, torque_nm)
         self._hand.set_mit(
             motor_id=motor_id,
             target_deg=angle,
             kp=0.0,
             kd=0.0,
             vel_rad_s=0.0,
-            torque_nm=float(torque_nm) * sign,
+            torque_nm=tau,
             deadline_ns=deadline_ns,
         )
+        return tau
+
+    # MIT position field is +-5 rad (protocol.mit_command); kp/kd fields 0..500 / 0..5.
+    MIT_POS_LIMIT_DEG = math.degrees(5.0) - 1.0
+    MIT_KP_MAX = 500.0
+    MIT_KD_MAX = 5.0
+
+    def command_impedance(self, motor_id: int, cmd, q_model: float, *,
+                          deadline_ns: int | None = None) -> float | None:
+        """Driver-side spring/damper (MIT kp/kd) plus feed-forward torque.
+
+        ``cmd`` is an impedance.ImpedanceCommand in model-joint units planned
+        at model angle ``q_model``.  The target is sent as an *offset* from
+        the latest raw encoder angle, so the model-angle clamp to the
+        calibrated range can never turn into a spurious position error.
+        Returns the motor-axis torque the driver produces right now (for
+        display), or None if nothing was sent.
+        """
+        if self._hand is None or not self._enabled:
+            return None
+        raw = self._last_angles_deg.get(motor_id)
+        if raw is None or not math.isfinite(raw):
+            return None
+        motor = self.mapping.motors[motor_id - 1]
+        ratio = motor.sign * motor.scale                 # model rad per raw rad
+        offset_deg = math.degrees(float(cmd.target_rad) - float(q_model)) / ratio
+        target_deg = raw + offset_deg
+        kp = min(self.MIT_KP_MAX, max(0.0, float(cmd.k) * motor.scale ** 2))
+        kd = min(self.MIT_KD_MAX, max(0.0, float(cmd.b) * motor.scale ** 2))
+        tau_ff = self.motor_axis_torque(motor_id, float(cmd.tau_ff))
+        if abs(target_deg) > self.MIT_POS_LIMIT_DEG:
+            # Outside the MIT position field: degrade to the equivalent
+            # feed-forward torque instead of a wrapped target.
+            tau_ff += kp * math.radians(offset_deg)
+            kp = 0.0
+            target_deg = raw
+        self._hand.set_mit(
+            motor_id=motor_id,
+            target_deg=target_deg,
+            kp=kp,
+            kd=kd,
+            vel_rad_s=0.0,
+            torque_nm=tau_ff,
+            deadline_ns=deadline_ns,
+        )
+        return kp * math.radians(target_deg - raw) + tau_ff
 
     def command_position(self, motor_id: int, target_deg: float, *, speed_rpm: float = 5.0,
                          current_a: float = 0.8, deadline_ns: int | None = None) -> None:

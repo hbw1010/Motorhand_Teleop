@@ -55,17 +55,25 @@ def _headless(args, runner: Runner) -> int:
     period = 1.0 / float(runner.config["simulation"].get("control_hz", 200.0))
     start = time.monotonic()
     last_print = start
+    next_t = start
     try:
         while args.duration <= 0 or time.monotonic() - start < args.duration:
             runner.tick(wall_clock=True, max_steps=30)
-            time.sleep(period)
+            # Fixed-rate schedule: sleep only the remainder of the period.
+            next_t += period
+            delay = next_t - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            else:
+                next_t = time.monotonic()
             if time.monotonic() - last_print >= 1.0 and runner.result is not None:
                 result = runner.result
                 print(
                     f"t={time.monotonic()-start:5.1f}s contacts={result.contact_count:3d} "
                     f"force={sum(result.finger_force_n.values()):7.2f}N "
                     f"tau_max={np.max(np.abs(result.torque_cmd_nm)):.3f}Nm "
-                    f"loop={runner.stats.loop_hz:5.1f}Hz kin={result.kinematics_ms:.1f}ms"
+                    f"loop={runner.stats.loop_hz:5.1f}Hz kin={result.kinematics_ms:.1f}ms "
+                    f"tick={runner.stats.tick_ms:.1f}ms steps={runner.stats.steps_last_tick}"
                 )
                 last_print = time.monotonic()
     except KeyboardInterrupt:

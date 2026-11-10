@@ -103,9 +103,21 @@ class FakeGlove:
         if not enabled:
             self._torque[:] = 0.0
 
-    def command_torque(self, motor_id: int, torque_nm: float, *, deadline_ns: int | None = None) -> None:
+    def command_torque(self, motor_id: int, torque_nm: float, *,
+                       deadline_ns: int | None = None) -> float | None:
         if 1 <= motor_id <= 12 and self._enabled:
             self._torque[motor_id - 1] = float(torque_nm)
+            return float(torque_nm)
+        return None
+
+    def command_impedance(self, motor_id: int, cmd, q_model: float, *,
+                          deadline_ns: int | None = None) -> float | None:
+        """Record the torque the driver PD would produce now (model frame)."""
+        if not (1 <= motor_id <= 12 and self._enabled):
+            return None
+        tau = float(cmd.k) * (float(cmd.target_rad) - float(q_model)) + float(cmd.tau_ff)
+        self._torque[motor_id - 1] = tau
+        return tau
 
     def command_position(self, motor_id: int, target_deg: float, *, speed_rpm: float = 5.0,
                          current_a: float = 0.8, deadline_ns: int | None = None) -> None:

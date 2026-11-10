@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .fast_closure import FastClosure, FastClosureError
 from .mapping import GloveMapping
 
 
@@ -23,7 +24,7 @@ class GloveKinematics:
     from the real glove / demo input, exactly like the real exoskeleton.
     """
 
-    def __init__(self, model_dir: str | Path, mapping: GloveMapping) -> None:
+    def __init__(self, model_dir: str | Path, mapping: GloveMapping, *, fast: bool = True) -> None:
         self.model_dir = Path(model_dir)
         script = self.model_dir / "scripts" / "solve_closed_chain.py"
         if not script.is_file():
@@ -63,20 +64,79 @@ class GloveKinematics:
         self._motor_model_joints = {m.motor_id: m.model_joint for m in mapping.motors}
         # Derivative columns are physical motor IDs J1..J12, not CAD solver order.
         self._motor_column = {m.model_joint: m.motor_id - 1 for m in mapping.motors}
+        # Vectorized solver with identical acceptance rules; the reference CAD
+        # solver remains the fallback (see fast_closure.py).
+        self._fast: FastClosure | None = FastClosure(self._solver) if fast else None
+        self._row_of = {name: i for i, name in enumerate(self.joint_names)}
+        self.fallback_count = 0
+        # Independent warm-start states.  The collision clamp alternates
+        # between the unclamped target pose and the clamped visible pose every
+        # cycle; sharing one continuation state made each solve start from the
+        # other pose (large deltas, many continuation steps).  The feedback
+        # derivative is always evaluated on the "target" slot, i.e. at the
+        # pose whose contacts produce the feedback.
+        self._slots: dict[str, dict] = {}
+        for slot in ("target", "visual"):
+            self._slots[slot] = self._new_slot()
 
-    def full_pose(self, motor_rad: np.ndarray, model, mapping: GloveMapping) -> np.ndarray:
-        new_targets = dict(self._targets)
+    def _new_slot(self) -> dict:
+        state = dict(self._solver.state)
+        return {
+            "targets": {name: 0.0 for name in self.independent},
+            "state": state,
+            "q": self._fast.vector(state) if self._fast is not None else None,
+        }
+
+    def copy_slot(self, src: str, dst: str) -> None:
+        """Make ``dst`` continue from the pose last solved in ``src``."""
+        a = self._slots[src]
+        self._slots[dst] = {
+            "targets": dict(a["targets"]),
+            "state": dict(a["state"]),
+            "q": None if a["q"] is None else a["q"].copy(),
+        }
+
+    def full_pose(self, motor_rad: np.ndarray, model, mapping: GloveMapping,
+                  *, slot: str = "target") -> np.ndarray:
+        record = self._slots[slot]
+        new_targets = dict(record["targets"])
         for motor in mapping.motors:
             new_targets[motor.model_joint] = float(motor_rad[motor.motor_id - 1])
         t0 = time.perf_counter()
-        pose = self._solver.solve(new_targets)
+        if self._fast is not None:
+            try:
+                q = self._fast.solve(record["q"], new_targets)
+                pose = self._fast.as_dict(q)
+                gap = self._fast.gap(q)
+            except FastClosureError:
+                # Retry with the reference solver from the same valid state.
+                self.fallback_count += 1
+                self._solver.state = self._fast.as_dict(record["q"])
+                pose = self._reference_solve(new_targets)
+                q = self._fast.vector(pose)
+                gap = float(self._solver.max_gap(pose))
+        else:
+            self._solver.state = dict(record["state"])
+            pose = self._reference_solve(new_targets)
+            q = None
+            gap = float(self._solver.max_gap(pose))
         self.last_solve_ms = (time.perf_counter() - t0) * 1e3
-        self.last_gap_m = float(self._solver.max_gap(pose))
+        self.last_gap_m = gap
+        state = {name: float(pose[name]) for name in self.joint_names}
+        self._slots[slot] = {"targets": new_targets, "state": state, "q": q}
         self._targets = new_targets
-        self._state = {name: float(pose[name]) for name in self.joint_names}
-        self._q = np.asarray([self._state[name] for name in self.joint_names], dtype=float)
-        self._derivative_key = None
+        self._state = state
+        self._q = np.asarray([state[name] for name in self.joint_names], dtype=float)
+        if slot == "target":
+            self._derivative_key = None
         return self._q
+
+    def _reference_solve(self, targets: dict[str, float]) -> dict[str, float]:
+        try:
+            return self._solver.solve(targets)
+        except ValueError as error:
+            # Callers keep the last valid pose on KinematicsError.
+            raise KinematicsError(str(error)) from error
 
     def tree_derivative(self) -> np.ndarray:
         """d(full 68-joint tree pose) / d(12 physical motor angles).
@@ -87,9 +147,24 @@ class GloveKinematics:
         with the implicit function theorem.  Rows are ``joint_names``; columns
         are physical motor IDs J1..J12.
         """
-        key = tuple(round(float(self._state[m]), 9) for m in self._solver.independent)
+        target = self._slots["target"]
+        key = tuple(round(float(target["state"][m]), 9) for m in self._solver.independent)
         if self._derivative is not None and self._derivative_key == key:
             return self._derivative
+        if self._fast is not None:
+            derivative = np.zeros((len(self.joint_names), 12), dtype=float)
+            motor_col = self._motor_column
+            blocks = self._fast.derivative(target["q"], list(motor_col))
+            for deps, motors, dq_dep in blocks.values():
+                cols = np.array([motor_col[m] for m in motors], dtype=int)
+                rows = [self._row_of[name] for name in deps]
+                derivative[np.ix_(rows, cols)] = dq_dep
+                for k, motor in enumerate(motors):
+                    derivative[self._row_of[motor], cols[k]] = 1.0
+            derivative.setflags(write=False)
+            self._derivative = derivative
+            self._derivative_key = key
+            return derivative
         derivative = np.zeros((len(self.joint_names), 12), dtype=float)
         motor_col = dict(self._motor_column)
 
@@ -97,7 +172,7 @@ class GloveKinematics:
             return self._solver._group_residual_jac(state, group)
 
         for group, deps in self.dependent_groups.items():
-            state = dict(self._state)
+            state = dict(target["state"])
             residual0, jac = residual_and_jac(state, group)
             if jac.size == 0:
                 continue
@@ -105,7 +180,7 @@ class GloveKinematics:
             if not motors:
                 continue
             cols = np.array([motor_col[m] for m in motors], dtype=int)
-            base_q = self._state
+            base_q = target["state"]
             # The residual is a function of the full 68-joint tree.  Perturb
             # one motor joint at a time and difference only its finger block.
             b = np.zeros((residual0.size, len(motors)), dtype=float)

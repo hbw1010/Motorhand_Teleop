@@ -42,7 +42,8 @@ def _insert_child(parent: ET.Element, child: ET.Element) -> None:
 
 
 def _patch_glove(root: ET.Element, model_path: Path, mapping: Any, *, config_kinematic: bool = False,
-                 timestep_s: float = 0.001, scene: dict[str, Any] | None = None) -> None:
+                 timestep_s: float = 0.001, scene: dict[str, Any] | None = None,
+                 collision_geometry: str = "mesh") -> None:
     compiler = root.find("compiler")
     if compiler is None:
         compiler = ET.SubElement(root, "compiler")
@@ -115,11 +116,23 @@ def _patch_glove(root: ET.Element, model_path: Path, mapping: Any, *, config_kin
         else:
             geom.set("size", f"{radius:.9g}")
         geom.set("pos", " ".join(f"{v:.9g}" for v in pos))
-        geom.set("contype", "1")
-        geom.set("conaffinity", "2")
+        # In "mesh" mode the proxies stay in the model (UI/tests use their
+        # positions) but do not collide.
+        collide = collision_geometry == "spheres"
+        geom.set("contype", "1" if collide else "0")
+        geom.set("conaffinity", "2" if collide else "0")
         geom.set("mass", "0")
         geom.set("rgba", "0.9 0.2 0.2 0.20")
         geom.set("group", "3")
+
+    if collision_geometry == "mesh":
+        # Collide with exactly what is drawn: every visual mesh of the glove
+        # (convex hull per part).  The hand-placed spheres sat on the dorsal
+        # motor housings and missed the palm-side finger rings entirely.
+        for geom in world.iter("geom"):
+            if geom.get("type") == "mesh" and (geom.get("name") or "").endswith("_visual"):
+                geom.set("contype", "1")
+                geom.set("conaffinity", "2")
 
     if not bool(config_kinematic):
         actuator = root.find("actuator")
@@ -217,10 +230,11 @@ def build_scene_xml(config: dict[str, Any], mapping: Any, specs: list[ObjectSpec
     _patch_glove(root, model_path, mapping,
                  config_kinematic=bool(config.get("glove", {}).get("kinematic", True)),
                  timestep_s=float(config.get("simulation", {}).get("timestep_s", 0.001)),
-                 scene=config.get("scene"))
+                 scene=config.get("scene"),
+                 collision_geometry=str(config.get("glove", {}).get("collision_geometry", "mesh")))
     _add_objects(root, specs, config)
-    # Remove visual mesh bodies' self-collision concerns: all original geoms
-    # already have contype/conaffinity 0, so only the added proxies collide.
+    # Glove geoms use contype 1 / conaffinity 2 and objects 2 / 2, so the
+    # glove never collides with itself, only with objects.
     return ET.tostring(root, encoding="unicode")
 
 
