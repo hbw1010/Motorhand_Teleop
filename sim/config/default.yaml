@@ -1,0 +1,134 @@
+# Standalone glove simulation configuration.
+# All force values here are nominal/simulated unless a calibration file is supplied.
+paths:
+  glove_model: ../assets/hand_motor_ve33/hand_motor_ve33_R/hand_closed_chain.xml
+  glove_mapping: ../hardware/encos_dexhand/configs/glove_mapping.json
+  feedback_limits: ../config/feedback/max-torque-linear-right.json
+  feedback_contact: ../config/feedback/contact-impedance-right.json
+  zero_backup_dir: ../hardware/encos_dexhand/configs/zero_backups
+
+simulation:
+  timestep_s: 0.001
+  physics_hz: 1000.0
+  control_hz: 200.0
+  ui_hz: 60.0
+  gravity: [0.0, 0.0, 0.0]
+  # How long a simulated command remains valid.
+  command_ttl_s: 0.10
+
+# Display frame of the CAD glove.  The raw MJCF has the right hand palm-down
+# at z=0; lift it and turn the palm up so the virtual objects sit above the
+# palm instead of appearing to float behind a hand that faces the floor.
+scene:
+  hand_position: [0.0, 0.0, 0.085]
+  hand_quat_wxyz: [0.0, 1.0, 0.0, 0.0]   # 180 deg about x: palm up
+  camera_lookat: [0.145, 0.005, 0.120]
+  camera_distance: 0.46
+  camera_azimuth: 122.0
+  camera_elevation: -24.0
+
+glove:
+  side: right
+  # The vE3.3 glove is a closed linkage.  Driving its 12 motor joints with
+  # torques in MuJoCo is numerically unstable; use the extracted CAD closure
+  # solver to make the glove kinematic from the 12 motor angles.  Contacts
+  # and object deformation are still solved by MuJoCo.
+  kinematic: true
+  # 12 motor joint names in motor-ID order (J1..J12).
+  # Fill from glove_mapping.json at runtime; these are fallbacks.
+  joint_order:
+    - thumb_cmc_flex
+    - thumb_cmc_abd
+    - thumb_mcp
+    - thumb_ip
+    - index_mcp_flex
+    - index_pip
+    - middle_mcp_flex
+    - middle_pip
+    - ring_mcp_flex
+    - ring_pip
+    - pinky_mcp_flex
+    - pinky_pip
+  kp_nm_rad: 3.0
+  kd_nm_s_rad: 0.8
+  torque_limit_nm: [4.0, 2.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0]
+  slew_nm_s: 60.0
+  feedback_gain: 10.0       # Nm per N at the contact, before limits; tune offline
+  feedback_filter_hz: 25.0
+  feedback_deadband_nm: 0.01
+  feedback_ramp_s: 0.15
+  # Collision-aware kinematic motion.  The CAD glove is driven kinematically,
+  # so without a guard a commanded finger can pass straight through a locked
+  # object.  The visible pose is clamped per finger when the target pose hits a
+  # locked object; feedback torque still uses the unclamped target pose.
+  collision_clamp: true
+  clamp_soft_allow_m: 0.0     # 0 = no visible penetration; unlock to squeeze the flex ball
+  # Per-motor torque direction.  Defaults are a nominal +1; verify each axis
+  # on hardware before trusting the haptic direction.
+  torque_sign: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+  release_torque_nm: 0.0
+
+objects:
+  rebuild_hz: 10.0
+  # Keep every object at its target pose unless the user unchecks "锁定物体"
+  # in the UI.  Unlocking lets the glove push/grasp objects (they can drift).
+  locked_default: true
+  # Extra viscous damping on a free object's 6 root DOFs so unlocking makes
+  # it follow/push gently instead of flying away after finger contact.
+  dynamic_damping: 0.05
+  # Cursor-target speed limit (m per UI/control update) for collision-aware
+  # dragging; prevents a fast mouse jump from tunnelling a small object.
+  drag_max_step_m: 0.015
+  defaults:
+    # ball_soft sits in the index-thumb pinch, near the open fingertips but
+    # without initial contact.  The other objects are laid out in a reachable
+    # arc; drag any of them into the hand.  Only the ball is a flex lattice.
+    - name: ball_soft
+      shape: sphere
+      size_m: 0.030
+      stiffness: 0.25       # 0 very soft .. 1 rigid
+      deformable: true
+      position: [0.140, 0.000, 0.163]
+    - name: ball_hard
+      shape: sphere
+      size_m: 0.030
+      stiffness: 0.92
+      deformable: false
+      position: [0.195, 0.090, 0.120]
+    - name: box_soft
+      shape: box
+      size_m: 0.030
+      stiffness: 0.25
+      deformable: false  # compliant contact; only the ball uses a flex lattice
+      position: [0.210, 0.000, 0.115]
+    - name: box_hard
+      shape: box
+      size_m: 0.030
+      stiffness: 0.92
+      deformable: false
+      position: [0.210, -0.090, 0.115]
+    - name: cylinder_soft
+      shape: cylinder
+      size_m: 0.030
+      stiffness: 0.25
+      deformable: false  # compliant contact; only the ball uses a flex lattice
+      position: [0.285, 0.070, 0.115]
+    - name: cylinder_hard
+      shape: cylinder
+      size_m: 0.030
+      stiffness: 0.92
+      deformable: false
+      position: [0.285, -0.060, 0.115]
+  size_range_m: [0.025, 0.070]
+  stiffness_range: [0.0, 1.0]
+  # Stiffness mapping: 0 = very soft (solref max), 1 = rigid (solref min).
+  solref_range_s: [0.010, 0.060]
+  damping: 5.0
+  friction: [1.0, 0.01, 0.001]
+
+telemetry:
+  default_dir: data
+  csv_columns: true
+  jsonl: true
+  ring_seconds: 30.0
+  latency_window: 600

@@ -1,0 +1,42 @@
+# 天机用的手套参数：motorhand_glove 节点读这份（天机仓库里是 config/motorhand_glove.yaml，键和值相同）。
+#   天机里启动：bash bash/run_hands.sh teleop glove:=motorhand        （bash bash/run_robot.sh ... --glove motorhand）
+# 每项注释写了 Motorhand 原值 → 天机值 和改的原因；同样的键全部填 Motorhand 原值的一份在 motorhand_glove.upstream.yaml。
+# 一只手一只手套，各自三个 CANable2。加第二只手套：gloves 里加上它，两只都填 <side>_ports（/dev/serial/by-id/...），
+# 按型号找适配器分不清是哪只手套的。
+motorhand_glove:
+  ros__parameters:
+    root: ""            # Motorhand_Teleop 检出（已 pixi install --frozen）；空：天机工作区旁边的 Motorhand_Teleop
+    gloves: ["right"]   # 有手套的手
+    worker: native      # C++ worker（一帧约 0.45 ms），或 python（worker.py，一帧 6~8 ms，备用）
+    native_binary: ""   # 空：天机工作区的 build/motorhand-glove-native/motorhand_glove_native；
+                        # 用本仓库编的就填 <Motorhand>/.cache/tianji-glove-native/motorhand_glove_native
+    rate_hz: 200.0      # 每秒发给 Wuji 手的目标数。原值 50（Motorhand 自己的 teleop）→ 200：天机 Wuji 驱动
+                        # 每秒发 200 次，C++ worker 一帧 0.45 ms 跟得上；再高没用
+    slot_ms: 1.0        # 每个 CAN 适配器每个时隙只问一个电机，一个电机每 时隙×4 读一次。原值 5 → 1：
+                        # 5 ms 时每个电机 20 ms 才读一次，发出时读数约 25 ms 旧；1 ms 时真机右手约 4.7 ms 旧。
+                        # stats 行里电机跟不上、或报 not streaming 时退回 2，再不行 5
+    stats_s: 10.0       # 每只手套多少秒打一行 stats；0：不打
+    # 对指（WujiRetarget 的 pinch）：拇指尖到某指尖的距离小于 d2 时，把那个指尖往拇指尖拉，
+    # 权重 (d2 - 距离) / (d2 - d1)，上限 pinch_weight，其余照手形。0：用重定向 yaml 里的（Motorhand 原值）。
+    pinch_d1_cm: 3.0    # 原值 2 → 3：面向任务的接管，更容易捏上
+    pinch_d2_cm: 6.0    # 原值 4 → 6：同上
+    pinch_weight: 1.0   # 原值 0.7 → 1.0：d1 以内指尖只对齐拇指尖、不再照手形（用户定）
+    right_ports: ""     # 它的适配器，逗号分隔；空：所有插着的 CANable2
+    right_mapping: ""   # 它的 glove_mapping.json；空：Motorhand 的 hardware/encos_dexhand/configs/glove_mapping.json
+    left_ports: ""
+    left_mapping: ""
+    # 手套电机出力（只有 C++ worker；worker 启动先回零，电机以 5 rpm 把手套带到零位姿势）：
+    force_feedback: true    # 手跟着这只手套时：Wuji 手受阻处，手套电机往回推
+    follow_hand: true       # 手跟着别的（DAgger 模型）时：手套电机把手套带到手的姿势
+    follow_kp: 15.0         # 跟随的位置刚度 Nm/rad。原值 45 → 15：一次 DAgger 里 2 号电机（拇指外展）因过热报
+                            # 错误码 1 共 11 次；戴着时拇指被顶开约 9°，45 一直出约 7 Nm，15 约 2.4 Nm。每个电机的推力
+                            # 另外不超过它的力反馈上限（限额文件的；没有限额文件时 worker 的 --follow-max-nm，默认 2 Nm。
+                            # Motorhand 原来跟随不限推力）
+    home_glove: true        # worker 启动时回零，每个 worker 只回一次（原值：每次连上都回零 → 电机故障重连后不再把正在用
+                            # 的手拽回零位）；回零容差原值 0.15 rad → 0.3：戴着时拇指外展停在离零位约 9°，0.15 永远
+                            # 到不了，电机顶着手直到报故障。false：从不回零
+    right_feedback_limits: ""   # 空：config/motorhand_feedback/max-torque-linear-right.json（每个电机 4 Nm、拇指外展
+                                #   2 Nm；原值和改的原因见 README）
+    right_feedback_contact: ""  # 空：config/motorhand_feedback/contact-impedance-right.json
+    left_feedback_limits: ""
+    left_feedback_contact: ""

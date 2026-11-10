@@ -1,0 +1,23 @@
+# Pixi environment
+sim/.pixi/
+
+# Python caches and build metadata
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated simulation data and logs
+sim/data/
+MUJOCO_LOG.TXT
+*.log
+
+# Local calibration backups
+.calibration_backup/
+
+# Editor / OS files
+.DS_Store
+.idea/
+.vscode/

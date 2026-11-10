@@ -1,0 +1,37 @@
+[workspace]
+name = "glove-sim"
+version = "0.1.0"
+description = "Standalone Motorhand glove force-feedback MuJoCo simulation"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.12.*"
+numpy = ">=1.26,<3"
+pyyaml = ">=6,<7"
+pyserial = ">=3.5"
+python-can = ">=4.3"
+pytest = ">=8,<9"
+scipy = ">=1.11,<2"
+
+[pypi-dependencies]
+mujoco = "==4.0.0"
+dearpygui = ">=2.0,<3"
+glove-sim = { path = ".", editable = true }
+encos-hand = { path = "../hardware/encos_dexhand", editable = true }
+
+[activation.env]
+PYTHONNOUSERSITE = "1"
+OMP_NUM_THREADS = "1"
+OPENBLAS_NUM_THREADS = "1"
+
+[tasks]
+smoke = "python scripts/smoke.py"
+sim = "python -m glove_sim.cli sim"
+teleop = "python -m glove_sim.cli teleop"
+check-glove = "python -m glove_sim.cli check-glove"
+zero-glove = "python -m glove_sim.cli zero-glove"
+home-glove = "python -m glove_sim.cli home-glove"
+record = "python -m glove_sim.cli record"
+replay = "python -m glove_sim.cli replay"
+test = "python -m pytest -q"

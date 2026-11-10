@@ -1,0 +1,33 @@
+# 和 motorhand_glove.yaml 同样的键，全部填 Motorhand 原值，用来对照：换成这份就按 Motorhand 原来的参数跑（天机的
+# motorhand_glove 节点读这份即可，例如 run_hands.sh 里把参数文件指过来）。每项为什么改成天机值见 motorhand_glove.yaml
+# 的注释和 README。不能用参数表达的两处：
+#   - 回零：worker 总是每个 worker 只回零一次、容差 0.3 rad（Motorhand 原来每次连上都回零、容差 0.15 rad）
+#   - 跟随推力：worker 总是把每个电机的推力限在力反馈上限内（Motorhand 原来不限）
+motorhand_glove:
+  ros__parameters:
+    root: ""
+    gloves: ["right"]
+    worker: native
+    native_binary: ""
+    rate_hz: 50.0         # Motorhand 自己的 teleop
+    slot_ms: 5.0          # Motorhand 驱动写死的时隙
+    stats_s: 10.0
+    pinch_d1_cm: 2.0      # config/retargeting/official/<side>.yaml 的 pinch_thresholds
+    pinch_d2_cm: 4.0
+    pinch_weight: 0.7     # 同一 yaml 的 pinch_weight_max（原来写死在 wuji_retarget.cpp）
+    right_ports: ""
+    right_mapping: ""
+    left_ports: ""
+    left_mapping: ""
+    force_feedback: true
+    follow_hand: true
+    follow_kp: 45.0       # Motorhand 驱动写死的位置刚度
+    home_glove: true
+    # Motorhand 原来的力反馈配置是 <Motorhand_Teleop>/config/feedback/max-torque-linear-right.json（每个电机 10 Nm、
+    # 6 Nm/s、2.0 A）和 contact-impedance-right.json：要用就填它们的绝对路径（worker 的工作目录不固定，相对路径
+    # 不可靠）；留空则是天机的那两份。限额文件绑定一只 Wuji 手的序列号（原文件 WH2KA01260814006，天机右手
+    # WH2KA01260814017），worker 会核对，对不上就不出力：在天机上用要先改成那只手的。
+    right_feedback_limits: ""
+    right_feedback_contact: ""
+    left_feedback_limits: ""
+    left_feedback_contact: ""

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glove-sim"
+version = "0.1.0"
+description = "Standalone Motorhand glove force-feedback MuJoCo simulation"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "numpy>=1.26,<3",
+  "pyyaml>=6,<7",
+  "scipy>=1.11,<2",
+  "pyserial>=3.5",
+  "python-can>=4.3",
+  "mujoco==4.0.0",
+  "dearpygui>=2.0,<3",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "encos-hand"
+version = "0.3.0"
+description = "Pure Python SDK for Encos 12-axis dexterous hand"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "python-can>=4.3.0",
+  "pyserial>=3.5",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
