@@ -25,7 +25,7 @@ def complete_geometry():
     # 每份矩阵均为完整CAD扰动、官方Retarget中心差分，不是目标回显或手写映射。
     bridge = create_retargeter(project_root=ROOT, estimate_jacobian=True)
     snapshots = []
-    for amount in (0.0, 0.20, 0.35):
+    for amount in (0.0, 0.20, 0.35, 0.60):
         joints = human_joints(amount)
         q = np.array([joints[name] for name in GLOVE_JOINTS])
         value = bridge.forward.local_jacobian(joints, step_rad=0.01)
@@ -202,7 +202,9 @@ def test_blocked_operator_feels_reaction_on_first_fresh_geometry_cycle(consumer_
 
 def test_one_finger_releases_without_retaining_old_force_while_another_is_blocked(consumer_factory):
     with consumer_factory(reflection_gain=6000.0, slew=1.0, dwell_s=0.04) as consumer:
-        set_human(consumer.glove, 0.35)
+        # 指腹任务点如实跟随手套真实 PIP/DIP：human 0.35 时中指仅约 0.09 rad，低于 error_on 0.10；
+        # 取 0.60 让中指确实越过接触门槛（轴线配置靠 2-3 倍 PIP 过冲才在 0.35 触发）。
+        set_human(consumer.glove, 0.60)
         consumer.hand.effort[:] = 0.8
         before = consumer.steps(32)[-1].force_feedback
         names = list(consumer.glove.model.motor_names)
@@ -214,7 +216,7 @@ def test_one_finger_releases_without_retaining_old_force_while_another_is_blocke
         assert np.any(before.virtual_hand_torque_nm[10:12])
 
         consumer.geometry.freeze()
-        joints = human_joints(0.35)
+        joints = human_joints(0.60)
         joints["index_pip"] = 0.33
         _, motors = consumer.glove.model.evaluate(joints)
         consumer.glove.plant.motors = dict(motors)
