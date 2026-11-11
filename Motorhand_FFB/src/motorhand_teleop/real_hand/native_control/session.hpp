@@ -25,6 +25,18 @@ struct SessionOptions {
     bool linear_force_feedback = false;
     bool left = false;
     std::uint64_t transition_ns = 500'000'000;
+    // Inference: the glove shadow follows the Wuji *command* (true) or the measured
+    // Wuji position (false).  Following the command keeps a grasp's squeeze (command
+    // deeper than the blocked fingers) in the glove pose, so the forward solve at
+    // takeover reproduces the command instead of releasing the object.
+    bool inverse_follows_command = true;
+    // Takeover handover: the remaining difference between the last command and the
+    // forward solve is kept as a per-joint offset, so the switch itself does not move
+    // the hand.  An offset decays as the operator moves that joint (by exp(-|motion| /
+    // takeover_offset_motion_rad)) and slowly with time (takeover_offset_tau_ns), so
+    // re-alignment happens while the operator is moving.  0 = legacy 0.5 s blend.
+    double takeover_offset_motion_rad = 0.10;
+    std::uint64_t takeover_offset_tau_ns = 4'000'000'000ULL;
 };
 
 struct SessionTick {

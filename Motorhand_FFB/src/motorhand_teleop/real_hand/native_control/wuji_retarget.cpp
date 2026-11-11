@@ -353,6 +353,21 @@ WujiRetarget& WujiRetarget::operator=(WujiRetarget&&) noexcept = default;
 Vec20 WujiRetarget::solve(const Points& points) { return impl_->solve(points); }
 Points WujiRetarget::hand_points(const Vec20& actual) { return impl_->hand_points(actual); }
 void WujiRetarget::reset() { impl_->has_last = false; }
+std::array<double, 21> WujiRetarget::task_scales() const {
+    std::array<double, 21> scales;
+    scales.fill(1.0);
+    for (int i = 0; i < 5; ++i)
+        for (int j = 0; j < 3; ++j) scales[4 * i + 2 + j] = impl_->segment[i][j];
+    return scales;
+}
+void WujiRetarget::seed(const Vec20& joint_rad) {
+    for (int i = 0; i < 20; ++i) {
+        if (!std::isfinite(joint_rad[i])) throw std::invalid_argument("non-finite retarget seed");
+        const int k = impl_->semantic[i];
+        impl_->last[k] = std::clamp(joint_rad[i], impl_->lower[k], impl_->upper[k]);
+    }
+    impl_->has_last = true;
+}
 void WujiRetarget::configure_differentiation() {
     check(nlopt_set_ftol_abs(impl_->opt.get(), 1e-11), "differentiation ftol");
     check(nlopt_set_maxeval(impl_->opt.get(), 200), "differentiation maxeval");

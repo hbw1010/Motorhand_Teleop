@@ -174,6 +174,45 @@ def _demo_joints(elapsed: float) -> dict[str, float]:
     return joints
 
 
+def _pinch_poses(landmarks) -> list[tuple[str, dict[str, float]]]:
+    """手套模型上拇指指尖任务点与各指指尖任务点重合的姿态（拇指 4 关节 + 该指 MCP/PIP 优化）。"""
+    from scipy.optimize import minimize
+
+    thumb = ["thumb_cmc_flex", "thumb_cmc_abd", "thumb_mcp", "thumb_ip"]
+    poses = []
+    for finger, tip in (("index", 8), ("middle", 12), ("ring", 16), ("pinky", 20)):
+        names = thumb + [f"{finger}_mcp_flex", f"{finger}_pip"]
+
+        def joints_of(x, names=names):
+            joints = {name: 0.0 for name in GLOVE_JOINTS}
+            joints.update(zip(names, (float(v) for v in x)))
+            return joints
+
+        def cost(x, tip=tip, joints_of=joints_of):
+            try:
+                points = landmarks.step(joints_of(x)).points_m
+            except Exception:
+                return 1.0
+            return float(np.sum((points[4] - points[tip]) ** 2)) + 1e-4 * float(np.sum(np.square(x)))
+
+        best = None
+        for x0 in ([0.3, 0.3, 0.3, 0.3, 0.5, 0.6], [0.6, 0.6, 0.4, 0.4, 0.8, 0.8], [0.0, 0.8, 0.2, 0.2, 0.9, 0.5]):
+            result = minimize(cost, x0, method="L-BFGS-B", bounds=[(-0.6, 1.6)] * 6)
+            if best is None or result.fun < best.fun:
+                best = result
+        poses.append((finger, joints_of(best.x)))
+    return poses
+
+
+def _demo_pinch(elapsed: float, poses) -> tuple[str, dict[str, float]]:
+    """每 4 s 一指：张开 → 捏合 → 停留 → 张开。"""
+    finger, target = poses[int(elapsed // 4.0) % len(poses)]
+    t = (elapsed % 4.0) / 4.0
+    s = 0.5 * (1.0 - np.cos(np.pi * min(t / 0.35, 1.0))) if t < 0.35 else 1.0 if t < 0.6 else \
+        0.5 * (1.0 + np.cos(np.pi * (t - 0.6) / 0.35)) if t < 0.95 else 0.0
+    return finger, {name: s * value for name, value in target.items()}
+
+
 def _pinch_mm(points: np.ndarray) -> list[float]:
     return [float(np.linalg.norm(points[4] - points[4 + 4 * k]) * 1000.0) for k in range(1, 5)]
 
@@ -181,12 +220,12 @@ def _pinch_mm(points: np.ndarray) -> list[float]:
 def run_live_viewer(
     project_root: str | Path = _DEFAULT_ROOT, *, mapping_path: str | Path | None = None,
     driver: str = "2", port: str = "auto", layout: str = "side", gap_m: float = 0.13,
-    retarget: str = "pad", demo: bool = False, markers: bool = True, trace: int | None = None,
+    retarget: str = "pad", demo: str | None = None, markers: bool = True, trace: int | None = None,
 ) -> None:
     root = Path(project_root)
     asset_root, yaml_path = _retarget_inputs(root, retarget)
     glove = None
-    if not demo:
+    if demo is None:
         hand_factory = None
         if driver == "2":
             from .real_hand.encos_gateway import gateway_hand_factory
@@ -221,6 +260,7 @@ def run_live_viewer(
     mount_rot = Rotation.from_quat([mount_quat[1], mount_quat[2], mount_quat[3], mount_quat[0]]).as_matrix()
     model = _combined_model(root, mount_pos, mount_quat)
     data = mujoco.MjData(model)
+    pinch_poses = _pinch_poses(landmarks) if demo == "pinch" else None
     wuji_offsets = _wuji_task_offsets(root, yaml_path)
     wuji_bodies = [(model.body(name).id, local) for name, local in wuji_offsets]
     glove_points_ids = [i for triple in _TASK_POINTS for i in triple]
@@ -234,7 +274,8 @@ def run_live_viewer(
                 raise RuntimeError(f"要求12轴在线，当前online_ids={glove.online_ids}，scan={found}")
             print(f"实时只读MuJoCo观察器已连接手套（驱动 {driver}）；不会发送位置/MIT命令。", flush=True)
         else:
-            print("演示模式：无硬件，脚本驱动手指开合。", flush=True)
+            print("演示模式（无硬件）：" + ("依次拇-食/中/无名/小对指，每指 4 s。" if demo == "pinch"
+                                             else "脚本驱动四指开合。"), flush=True)
         print(f"重定向任务点：{'指腹' if retarget == 'pad' else '手指中心轴线'}（{yaml_path.name}）；"
               f"布局：{'并列' if layout == 'side' else '叠放'}；腕部换基几何残差={geometry_rms * 1000.0:.2f} mm", flush=True)
         if markers:
@@ -267,7 +308,10 @@ def run_live_viewer(
                     # SDK反馈已完成电机正解；显示直接使用同一真实装配，不再反解q。
                     _set_glove_pose(model, data, state.tree_positions_rad)
                 else:
-                    joints = _demo_joints(time.monotonic() - start)
+                    if pinch_poses is not None:
+                        _, joints = _demo_pinch(time.monotonic() - start, pinch_poses)
+                    else:
+                        joints = _demo_joints(time.monotonic() - start)
                     frame, q = solve(joints)
                     landmarks.model.solve(joints)
                     _set_glove_pose(model, data, landmarks.model.evaluate_raw(joints).all_positions)
@@ -336,7 +380,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--layout", choices=("side", "overlay"), default="side", help="并列（默认）或腕部重合叠放")
     parser.add_argument("--gap", type=float, default=0.13, help="并列时两模型的横向间距（米）")
     parser.add_argument("--retarget", choices=("pad", "axis"), default="pad", help="指腹（默认）或原中心轴线任务点")
-    parser.add_argument("--demo", action="store_true", help="无硬件，脚本驱动")
+    parser.add_argument("--demo", nargs="?", const="open", choices=("open", "pinch"), default=None,
+                        help="无硬件演示：open 四指开合（默认），pinch 依次拇指对四指")
     parser.add_argument("--no-markers", action="store_true", help="不画任务点球标记")
     parser.add_argument("--trace", type=int, default=None, metavar="MOTOR_ID",
                         help="每 0.1 s 打印该电机的原始角/关节角/显示角/Wuji 角变化量（替代每秒总表）")

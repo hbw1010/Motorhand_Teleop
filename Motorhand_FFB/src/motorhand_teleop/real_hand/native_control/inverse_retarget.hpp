@@ -34,8 +34,11 @@ struct InverseResult {
 
 class InverseRetarget {
 public:
+    // scale_aware: match hand_points / WujiRetarget::task_scales(), i.e. the glove
+    // geometry that the forward solve maps onto the given Hand2 pose, so that
+    // forward(inverse(q)) ~= q.  false: legacy unscaled matching.
     InverseRetarget(Ve33Model& glove, WujiRetarget& hand,
-                    std::array<std::array<double, 2>, 12> motor_bounds);
+                    std::array<std::array<double, 2>, 12> motor_bounds, bool scale_aware = true);
     ~InverseRetarget();
     InverseRetarget(const InverseRetarget&) = delete;
     InverseRetarget& operator=(const InverseRetarget&) = delete;
@@ -47,6 +50,7 @@ private:
     Ve33Model& glove_;
     WujiRetarget& hand_;
     std::array<std::array<double, 2>, 12> motor_bounds_;
+    std::array<double, 21> scales_{};
     GlovePose warm_pose_{};
     Points warm_target_{};
     Vec12 warm_anchor_{};

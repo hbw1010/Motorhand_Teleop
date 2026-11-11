@@ -204,8 +204,12 @@ struct InverseRetarget::Optimizer {
 };
 
 
-InverseRetarget::InverseRetarget(Ve33Model& glove, WujiRetarget& hand, Bounds motor_bounds)
+InverseRetarget::InverseRetarget(Ve33Model& glove, WujiRetarget& hand, Bounds motor_bounds, bool scale_aware)
     : optimizer_(std::make_unique<Optimizer>()), glove_(glove), hand_(hand), motor_bounds_(motor_bounds) {
+    scales_.fill(1.0);
+    if (scale_aware) scales_ = hand_.task_scales();
+    for (double scale : scales_)
+        if (!std::isfinite(scale) || scale <= 0) throw std::invalid_argument("retarget task scale must be positive");
     for (const auto& bounds : motor_bounds_) {
         if (!std::isfinite(bounds[0]) || !std::isfinite(bounds[1]) || bounds[0] >= bounds[1]) {
             throw std::invalid_argument("motor bounds must be finite and strictly ordered");
@@ -229,7 +233,10 @@ InverseResult InverseRetarget::solve(const Vec20& actual_hand, const GlovePose& 
     if (!finite_pose(measured_seed)) return fail("non-finite measured glove pose or derivatives");
 
     try {
-        const Points target = hand_.hand_points(actual_hand);
+        Points target = hand_.hand_points(actual_hand);
+        // Undo the forward solve's per-point scaling (points are wrist-relative).
+        for (int point = 0; point < 21; ++point)
+            for (int axis = 0; axis < 3; ++axis) target[3 * point + axis] /= scales_[point];
         if (!finite_array(target)) return fail("Hand2 forward kinematics produced non-finite points");
         const GlovePose& initial = has_warm_pose_ ? warm_pose_ : measured_seed;
         const Bounds active = glove_.active_joint_bounds(initial);

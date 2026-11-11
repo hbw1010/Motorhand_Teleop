@@ -79,6 +79,9 @@ struct Session::Impl {
     std::optional<InverseWorkerResult> inverse_result;
     std::optional<JacobianSnapshot> jacobian_result;
     Vec20 lower{}, upper{}, last_hand_target{}, hand_anchor{};
+    Vec20 takeover_offset{}, takeover_last_raw{};
+    bool takeover_has_raw = false;
+    std::uint64_t takeover_offset_clock = 0;
     Vec12 glove_anchor{};
     bool connected = false, enabled = false, closed = false, fault = false;
     bool requested_takeover = false, mode_takeover = false, mode_initialized = false;
@@ -324,7 +327,9 @@ SessionTick Session::step_inference(const Vec20& input, std::uint64_t source_ns)
                 s.inverse_result = std::move(*done);
             }
             if (h.received_ns > s.inverse_submit_stamp) {
-                s.inverse_last_id = s.inverse->submit(h, pose, h.received_ns);
+                HandFrame source = h;
+                if (s.options.inverse_follows_command && s.has_hand_target) source.position_rad = s.last_hand_target;
+                s.inverse_last_id = s.inverse->submit(source, pose, h.received_ns);
                 s.inverse_submit_stamp = h.received_ns;
             }
             auto now = now_ns();
@@ -391,6 +396,10 @@ SessionTick Session::step_takeover() {
             s.enter_mode(true, h, g);
             h = s.read_hand(true); g = s.read_glove(); pose = s.pose_for(g);
             s.transition_clock = now_ns();
+            // The forward solver was idle during inference: start it (warm start and
+            // norm_delta prior) at the command being handed over, not a stale pose.
+            s.retarget->seed(s.hand_anchor);
+            s.takeover_has_raw = false;
         }
         if (s.jacobian) {
             if (auto completed = s.jacobian->poll()) s.jacobian_result = std::move(*completed);
@@ -400,7 +409,27 @@ SessionTick Session::step_takeover() {
         }
         Vec20 target = s.retarget->solve(pose.points_m);
         s.check_target(target);
-        target = blend(s.hand_anchor, target, s.hand_blend(now_ns(), true));
+        if (s.options.takeover_offset_motion_rad > 0) {
+            const auto now = now_ns();
+            if (!s.takeover_has_raw) {
+                for (int i = 0; i < 20; ++i) s.takeover_offset[i] = s.hand_anchor[i] - target[i];
+                s.takeover_has_raw = true;
+            } else {
+                const double dt = now > s.takeover_offset_clock ? double(now - s.takeover_offset_clock) : 0.0;
+                const double time_decay = s.options.takeover_offset_tau_ns ?
+                    std::exp(-dt / double(s.options.takeover_offset_tau_ns)) : 1.0;
+                for (int i = 0; i < 20; ++i) {
+                    const double motion = std::abs(target[i] - s.takeover_last_raw[i]);
+                    s.takeover_offset[i] *= time_decay * std::exp(-motion / s.options.takeover_offset_motion_rad);
+                }
+            }
+            s.takeover_offset_clock = now;
+            s.takeover_last_raw = target;
+            for (int i = 0; i < 20; ++i)
+                target[i] = std::clamp(target[i] + s.takeover_offset[i], s.lower[i], s.upper[i]);
+        } else {
+            target = blend(s.hand_anchor, target, s.hand_blend(now_ns(), true));
+        }
         s.check_target(target);
         const auto until = std::min(deadline(h.received_ns), deadline(g.oldest_ns));
         const auto completed = s.output_worker ? s.output_worker->poll() : std::nullopt;

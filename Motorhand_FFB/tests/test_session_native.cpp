@@ -363,10 +363,42 @@ void linear_feedback(const Fixture& f) {
     check(delivered, "linear feedback did not deliver a nonzero nominal torque");
     session.stop(); no_expired_commands(); sim.stop();
 }
+// Inference grasps (Wuji blocked at the open pose while the command is the bent pose);
+// switching to takeover with the glove held still must keep the grasp command instead
+// of falling back to the blocked position (the object would be released).
+void grasp_handover(const Fixture& f) {
+    sim.reset(f.initial); sim.start();
+    Session session(f.options); session.connect(); session.enable();
+    auto next=Clock::now();
+    auto run_inference=[&](const Vec20& target, double seconds) {
+        SessionTick tick{};
+        auto begin=Clock::now();
+        while (Clock::now()-begin<std::chrono::duration<double>(seconds)) {
+            tick=session.step_inference(target,now_ns());
+            next+=std::chrono::milliseconds(20); std::this_thread::sleep_until(next);
+        }
+        return tick;
+    };
+    run_inference(f.initial,0.6);
+    { std::lock_guard<std::mutex> lock(sim.mutex); sim.frozen=true; }   // fingers blocked by the object
+    auto grasp=run_inference(f.bent,1.2);
+    check(distance(grasp.wuji_target,f.bent)<1e-6,"inference must command the grasp pose");
+    { std::lock_guard<std::mutex> lock(sim.mutex); sim.manual=true; sim.manual_motors=sim.motors; }   // operator holds still
+    session.request_takeover(true);
+    auto first=session.step_takeover();
+    check(distance(first.wuji_target,f.bent)<0.01,"takeover switch moved the hand");
+    SessionTick last=first;
+    next=Clock::now();
+    for (int i=0; i<30; ++i) { last=session.step_takeover(); next+=std::chrono::milliseconds(20); std::this_thread::sleep_until(next); }
+    const double span=distance(f.bent,f.initial);
+    check(distance(last.wuji_target,f.bent)<0.3*span,"takeover released the grasp toward the blocked position");
+    session.stop(); sim.stop(); no_expired_commands();
+}
+
 int main(int argc, char** argv) {
     try {
         auto root=argc>1 ? std::filesystem::absolute(argv[1]) : std::filesystem::current_path();
-        Fixture f(root); replay_takeover_and_resume(f); fault_case(f,true); fault_case(f,false); asynchronous_glove_fault(f); linear_feedback(f);
+        Fixture f(root); replay_takeover_and_resume(f); grasp_handover(f); fault_case(f,true); fault_case(f,false); asynchronous_glove_fault(f); linear_feedback(f);
         std::cout<<"Offline native Session integration passed\n"; return 0;
     } catch (const std::exception& e) {
         sim.stop(); std::cerr<<"Offline native Session integration failed: "<<e.what()<<'\n'; return 1;
