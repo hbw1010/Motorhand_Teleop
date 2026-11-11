@@ -26,8 +26,12 @@ class FakeGlove:
     """Deterministic offline backend for smoke tests and demos.
 
     It is intentionally not a physics device: ``command_torque`` records the
-    requested nominal torque and the reported current is a simulated proxy.
+    requested nominal torque and the reported current is a simulated proxy
+    (motor-axis torque / torque constant).  Like RealGlove, the command
+    methods return the motor-axis torque.
     """
+
+    TORQUE_CONSTANT_NM_PER_A = 5.1
 
     def __init__(self, mapping: GloveMapping, *, demo: bool = True, period_s: float = 6.0,
                  amplitude: float = 1.0, seed: int = 7) -> None:
@@ -84,7 +88,8 @@ class FakeGlove:
             self._q += self._rng.normal(0.0, self._noise, size=12)
         raw = self.mapping.model_rad_to_raw_deg([float(v) for v in self._q])
         current = {
-            motor_id: float(self._torque[motor_id - 1] / 0.035) if motor_id - 1 < len(self._torque) else 0.0
+            motor_id: float(self._motor_axis(motor_id, self._torque[motor_id - 1])
+                            / self.TORQUE_CONSTANT_NM_PER_A)
             for motor_id in range(1, 13)
         }
         return GloveState(
@@ -103,21 +108,25 @@ class FakeGlove:
         if not enabled:
             self._torque[:] = 0.0
 
+    def _motor_axis(self, motor_id: int, torque_model_nm: float) -> float:
+        motor = self.mapping.motors[motor_id - 1]
+        return float(torque_model_nm) * motor.sign * motor.scale
+
     def command_torque(self, motor_id: int, torque_nm: float, *,
                        deadline_ns: int | None = None) -> float | None:
         if 1 <= motor_id <= 12 and self._enabled:
             self._torque[motor_id - 1] = float(torque_nm)
-            return float(torque_nm)
+            return self._motor_axis(motor_id, torque_nm)
         return None
 
     def command_impedance(self, motor_id: int, cmd, q_model: float, *,
                           deadline_ns: int | None = None) -> float | None:
-        """Record the torque the driver PD would produce now (model frame)."""
+        """Record the torque the driver PD would produce now; returns it on the motor axis."""
         if not (1 <= motor_id <= 12 and self._enabled):
             return None
         tau = float(cmd.k) * (float(cmd.target_rad) - float(q_model)) + float(cmd.tau_ff)
         self._torque[motor_id - 1] = tau
-        return tau
+        return self._motor_axis(motor_id, tau)
 
     def command_position(self, motor_id: int, target_deg: float, *, speed_rpm: float = 5.0,
                          current_a: float = 0.8, deadline_ns: int | None = None) -> None:

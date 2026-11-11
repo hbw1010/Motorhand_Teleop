@@ -102,7 +102,10 @@ class DriverImpedancePlanner:
         self.gain = float(cfg.get("gain", 1.0))
         self.damping_s = float(cfg.get("damping_s", 0.008))
         self.damping_max = float(cfg.get("damping_max", 0.5))
-        self.k_max = float(cfg.get("k_max_nm_per_rad", 80.0))
+        # Per-motor stiffness multiplier (J1 thumb CMC needs more than the
+        # other joints) and per-motor kp ceiling; scalars apply to all.
+        self.joint_gain = _vec(cfg.get("joint_gain", 1.0))
+        self.k_max = _vec(cfg.get("k_max_nm_per_rad", 80.0))
         self.lookahead_s = float(cfg.get("release_lookahead_s", 0.02))
         self.margin = float(cfg.get("torque_margin", 0.85))
         # "soften" (default): on rebound the push is reduced by k*|v|*lookahead
@@ -135,7 +138,7 @@ class DriverImpedancePlanner:
             sign, surface, k = int(block[0]), float(block[1]), float(block[2])
             depth = sign * (q[i] - surface)       # > 0: finger inside the object
             press_vel = sign * dq[i]              # > 0: still pressing in
-            k = min(self.k_max, max(0.0, k * self.gain)) * ramp
+            k = min(float(self.k_max[i]), max(0.0, k * self.gain * float(self.joint_gain[i]))) * ramp
             if k <= 0.0 or depth <= 0.0:
                 self._damping_on[i] = False
                 out.append(free)

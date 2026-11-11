@@ -43,6 +43,11 @@ class RealGlove:
         self._hand = None
         self._enabled = False
         self._last_angles_deg: dict[int, float] = {}
+        # Feedback older than this is treated as lost (motor power / CAN
+        # cable).  Each motor is refreshed every ~20 ms; the SDK otherwise
+        # keeps returning the last cached angle forever, which froze the sim.
+        self.max_feedback_age_s = 0.25
+        self._opened_ns = 0
 
     @property
     def connected(self) -> bool:
@@ -65,6 +70,7 @@ class RealGlove:
         try:
             self._hand.connect()
             self._hand.scan()
+            self._opened_ns = time.monotonic_ns()
             online = tuple(sorted(self._hand.get_online_ids()))
             if online != tuple(range(1, 13)):
                 raise RealGloveError(f"必须 12 个电机在线，当前在线={online}")
@@ -99,6 +105,21 @@ class RealGlove:
                     received_ns.append(int(stamp))
                 except (TypeError, ValueError):
                     pass
+        now_ns = time.monotonic_ns()
+        limit_ns = int(self.max_feedback_age_s * 1e9)
+        stale = []
+        for mid in range(1, 13):
+            stamp = feedbacks.get(mid, {}).get("received_ns")
+            if stamp is None:
+                # No timed packet yet: allowed only right after connecting.
+                if now_ns - self._opened_ns > 4 * limit_ns:
+                    stale.append(mid)
+            elif now_ns - int(stamp) > limit_ns:
+                stale.append(mid)
+        if stale:
+            raise RealGloveError(
+                f"电机反馈中断 {stale}（超过 {self.max_feedback_age_s * 1000:.0f} ms 无新数据）："
+                "检查手套电源和 CAN 线")
         self._last_angles_deg = angles_deg
         # Use the oldest motor packet timestamp for a conservative sensor age.
         stamp_ns = min(received_ns) if received_ns else time.monotonic_ns()

@@ -4,6 +4,7 @@ import json
 import math
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 import mujoco
@@ -22,9 +23,79 @@ from glove_sim.sdk.zero import write_zero
 @pytest.fixture(scope="module")
 def setup():
     config = load_config(None)
+    # These tests exercise the legacy scattered layout with 30 mm objects;
+    # palm mode has its own tests below.
+    config["objects"]["placement"] = "scene"
+    # ...and their world-frame object positions assume the lying, palm-up hand.
+    config["scene"].update(hand_position=[0.0, 0.0, 0.085], hand_quat_wxyz=[0.0, 1.0, 0.0, 0.0])
+    mapping = GloveMapping.load(config["paths"]["glove_mapping"])
+    specs = [ObjectSpec.from_dict({**item, "size_m": 0.030}) for item in config["objects"]["defaults"]]
+    return config, mapping, specs
+
+
+def _palm_setup():
+    config = load_config(None)
+    config["objects"]["placement"] = "palm"
     mapping = GloveMapping.load(config["paths"]["glove_mapping"])
     specs = [ObjectSpec.from_dict(item) for item in config["objects"]["defaults"]]
     return config, mapping, specs
+
+
+def _palm_contact_fingers(sim: Simulation, mapping, frac: float) -> set[str]:
+    """Fingers touching the palm object when every motor is at ``frac`` of its closing range."""
+    hi = np.array([m.model_rad_limits()[1] for m in mapping.motors])
+    tree = sim.kinematics.full_pose(frac * hi, sim.model, mapping, slot="placement")
+    obj = sim.object_runtime[0]
+    d = mujoco.MjData(sim.model)
+    d.qpos[:] = sim.model.qpos0
+    d.qpos[sim._tree_qposadr] = tree
+    d.qpos[obj.qposadr:obj.qposadr + 3] = obj.target_position
+    d.qpos[obj.qposadr + 3:obj.qposadr + 7] = obj.target_quat
+    mujoco.mj_fwdPosition(sim.model, d)
+    out = set()
+    for i in range(d.ncon):
+        g = (int(d.contact[i].geom1), int(d.contact[i].geom2))
+        for gid in g:
+            if gid in sim.glove_geoms and not all(x in sim.glove_geoms for x in g):
+                out.add(sim.glove_geoms[gid])
+    return out
+
+
+def test_palm_mode_single_object_seated_and_graspable():
+    config, mapping, specs = _palm_setup()
+    sim = Simulation(config, mapping, specs)
+    assert [o.name for o in sim.object_runtime] == [config["objects"]["palm"]["default_object"]]
+    assert sim.objects_locked
+    for name in ("ball_hard", "cylinder_soft", "box_hard"):
+        sim.select_object(name)
+        assert [o.name for o in sim.object_runtime] == [name]
+        for size in (0.025, 0.06):
+            sim.set_object_shape(name, size_m=size)
+            # Free at rest (open and relaxed hand), grasped when the hand closes.
+            assert not _palm_contact_fingers(sim, mapping, 0.0)
+            assert not _palm_contact_fingers(sim, mapping, 0.10)
+            assert len(_palm_contact_fingers(sim, mapping, 1.0)) >= 2
+            # Seated on the palm side, between wrist and finger roots
+            # (checked in the hand base frame, independent of scene pose).
+            origin, rot, *_ = sim._palm_frame()
+            local = rot.T @ (sim.object_runtime[0].target_position - origin)
+            assert 0.0 < local[0] < 0.09 and local[2] < -0.005
+
+
+def test_palm_object_stays_fixed_under_grasp():
+    config, mapping, specs = _palm_setup()
+    sim = Simulation(config, mapping, specs)
+    sim.select_object("ball_hard")
+    start = sim.object_runtime[0].target_position.copy()
+    grasp = np.array([0.20, 0.15, 0.6, 0.6, 0.8, 1.2, 0.8, 1.2, 0.8, 1.2, 0.8, 1.2])
+    for i in range(120):
+        sim.update_glove(grasp * min(1.0, i / 80.0))
+        sim.step(feedback_enabled=True, dt_s=0.001)
+    a = sim.object_runtime[0].qposadr
+    assert np.allclose(sim.data.qpos[a:a + 3], start, atol=1e-6)
+    assert sim.contact_blocks()  # the closing fingers met the object
+    sim.reset_object_poses()
+    assert np.allclose(sim.object_runtime[0].target_position, start, atol=1e-9)
 
 
 def _grasp(spec: ObjectSpec, config, mapping, steps: int = 550):
@@ -380,7 +451,13 @@ def test_runner_records_torque_actually_sent(setup):
         runner.start()
         runner.sim.feedback_step = lambda raw, **_: np.linspace(-0.3, 0.3, 12)
         result = runner.tick(max_steps=1, wall_clock=False)
-        assert np.allclose(runner.sent_torque_nm, result.torque_cmd_nm)
+        # sent_torque_nm is on the motor axis; converted back it is the command.
+        assert np.allclose(runner.to_model_torque(runner.sent_torque_nm), result.torque_cmd_nm)
+        sample = runner.plot_samples[-1]
+        assert np.allclose(sample.torque_sent_nm, result.torque_cmd_nm)
+        # Fake current = motor-axis torque / Kt, so current x Kt gives the command back.
+        runner.tick(max_steps=1, wall_clock=False)
+        assert np.allclose(runner.plot_samples[-1].torque_measured_nm, result.torque_cmd_nm)
         runner.set_feedback(False)
         assert not np.any(runner.sent_torque_nm)
         runner.tick(max_steps=1, wall_clock=False)
@@ -456,10 +533,17 @@ def test_paused_plots_keep_the_frozen_snapshot():
         ui._plots_paused, ui._frozen_hist, ui._frozen_t = False, [], np.zeros(0)
         ui._danger_theme = 0
 
+        from glove_sim.runner import PlotSample
+        ui._t0 = 0.0
+
         def row(t, value):
-            z = [0.0] * 12
-            col = [value] * 12
-            return (t, [0.0] * 6, col, z, [0.0] * 5, 0.0, 0, 0.0, z, z, col, col, z)
+            z = np.zeros(12)
+            col = np.full(12, value)
+            return PlotSample(t_ns=int(t * 1e9), finger_force_n=[0.0] * 6, torque_driver_nm=col,
+                              sim_q=z, penetration_m=[0.0] * 5, object_disp_m=0.0, contact_count=0,
+                              sensor_age_ms=0.0, current_a=z, sim_dq=z, torque_spring_nm=col,
+                              torque_sent_nm=col, real_q=z, real_dq=z, torque_measured_nm=z,
+                              encoder_clamped=np.zeros(12, dtype=bool), source="fake")
 
         ui._history.extend([row(0.0, 1.0), row(0.1, 1.0)])
         ui._on_pause_plots()
@@ -626,8 +710,8 @@ def test_runner_drives_impedance_in_contact(setup):
         runner.tick(max_steps=1, wall_clock=False)
         cmd = runner.last_impedance[5]
         assert cmd.k == pytest.approx(30.0)
-        assert runner.sent_torque_nm[5] == pytest.approx(-1.5, abs=0.05)
-        assert runner.result.torque_cmd_nm[5] == pytest.approx(runner.sent_torque_nm[5], abs=0.05)
+        assert runner.to_model_torque(runner.sent_torque_nm)[5] == pytest.approx(-1.5, abs=0.05)
+        assert runner.result.torque_cmd_nm[5] == pytest.approx(runner.to_model_torque(runner.sent_torque_nm)[5], abs=0.05)
     finally:
         runner.close()
 
@@ -701,3 +785,197 @@ def test_stale_block_released_when_object_is_gone(setup):
     sim.set_object_pose("ball_hard", position=np.array([0.5, 0.5, 0.5]))
     sim.step(feedback_enabled=False, dt_s=0.001)
     assert not any(i in sim._blocked for i in ring)  # object gone: released
+
+
+def test_plot_samples_every_tick_with_real_velocities(setup):
+    """Curves get one sample per control tick; velocity curves are not the (zeroed) MuJoCo qvel."""
+    from glove_sim.runner import Runner
+
+    config, mapping, specs = setup
+    runner = Runner(config, mapping, FakeGlove(mapping), specs, feedback=False)
+    try:
+        runner.start()
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 1.5:
+            runner.tick(max_steps=2)  # rate-gated to control_hz
+            time.sleep(0.002)
+        samples = list(runner.plot_samples)
+        assert len(samples) > 120  # ~100 Hz control rate, not the 10 Hz redraw rate
+        assert max(float(np.abs(s.real_dq).max()) for s in samples) > 0.05
+        assert max(float(np.abs(s.sim_dq).max()) for s in samples) > 0.05
+        # The plotted encoder angle is the unclamped value.
+        motor = mapping.motors[0]
+        runner.state.raw_deg[1] = motor.zero_deg + 200.0 / (motor.sign * motor.scale)
+        runner._plot_sample(runner.result, np.zeros(12))
+        sample = runner._plot_sample(runner.result, np.zeros(12))
+        assert sample.encoder_clamped[0] and sample.real_q[0] == pytest.approx(math.radians(200.0))
+    finally:
+        runner.close()
+
+
+def test_session_recording_rebuilds_scene_and_contacts(tmp_path):
+    """A recorded session reproduces the curves and the scene state of every tick."""
+    from glove_sim.recording import load_session
+    from glove_sim.runner import Runner
+
+    config, mapping, specs = _palm_setup()
+    glove = FakeGlove(mapping, demo=False)
+    hi = np.array([m.model_rad_limits()[1] for m in mapping.motors])
+    glove._hold = 0.65 * hi            # squeeze the palm object
+    runner = Runner(config, mapping, glove, specs, feedback=True)
+    try:
+        runner.start()
+        path = runner.start_recording(str(tmp_path))
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 1.3:
+            runner.tick(max_steps=4)
+            time.sleep(0.002)
+        live_force = list(runner.plot_samples)[-1].finger_force_n
+        saved = runner.stop_recording()
+        assert saved == path
+    finally:
+        runner.close()
+    s = load_session(path)
+    n = len(s)
+    assert n > 80
+    assert s["real_q"].shape == (n, 12) and s["finger_force_n"].shape == (n, 6)
+    assert np.all(np.diff(s.t) > 0)
+    assert s.meta["source"] == "fake" and s.meta["segments"][0]["objects"][0]["name"] == "ball_soft"
+    i = n - 1
+    # The last tick is squeezing the object: feedback contacts recomputed from
+    # the recorded state touch the same fingers the live sim reported.
+    assert s["blocked"][i].any() and s["feedback_on"][i]
+    assert np.isfinite(s["imp_k"][i]).all()
+    contacts = s.contacts_at(i, pose="target")
+    groups = {c.group for c in contacts}
+    live_groups = {g for g, f in zip(("thumb", "index", "middle", "ring", "pinky", "palm"), live_force)
+                   if f > 1e-6}
+    assert groups and groups == live_groups
+    # Visible hand is held at the surface; the target (real-hand) pose is not.
+    seg = s.segment_of(i)
+    adr = np.asarray(seg["tree_qposadr"])
+    assert not np.allclose(s.qpos_at(i, "visible")[adr], s.qpos_at(i, "target")[adr])
+    data = s.mjdata_at(i)
+    assert data.qpos.shape[0] == seg["nq"]
+    csv = s.to_csv()
+    lines = csv.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == n + 2 and "real_q_J1" in lines[1]
+
+
+def test_real_glove_rejects_stale_feedback(setup):
+    """Lost motor power must raise, not keep returning the last cached angle."""
+    from glove_sim.sdk.real import RealGlove, RealGloveError
+
+    _config, mapping, _specs = setup
+
+    class Hand:
+        def __init__(self):
+            self.stamp = time.monotonic_ns()
+
+        def get_all_angles(self):
+            return {i: 0.0 for i in range(1, 13)}
+
+        def get_all_feedbacks(self):
+            return {i: {"received_ns": self.stamp, "err_code": 0} for i in range(1, 13)}
+
+        def get_online_ids(self):
+            return list(range(1, 13))
+
+    glove = RealGlove(mapping)
+    glove._hand = Hand()
+    glove._opened_ns = time.monotonic_ns()
+    assert glove.read().source == "real"
+    glove._hand.stamp -= int(1e9)          # no packet for 1 s
+    with pytest.raises(RealGloveError, match="反馈中断"):
+        glove.read()
+    glove._hand.stamp = time.monotonic_ns()   # power back: recovers
+    assert glove.read().source == "real"
+
+
+def test_j1_gets_more_contact_stiffness_and_torque():
+    """J1 (thumb CMC) has its own stiffness multiplier, kp ceiling and torque limit."""
+    from glove_sim.impedance import DriverImpedancePlanner
+
+    config = load_config(None)
+    glove = config["glove"]
+    planner = DriverImpedancePlanner(glove["driver_impedance"], glove["torque_limit_nm"])
+    q = np.full(12, 0.5)
+    dq = np.zeros(12)
+    blocked = {0: (1, 0.2, 40.0), 4: (1, 0.2, 40.0)}   # same object, same depth
+    cmds = planner.plan(q, dq, blocked)
+    j1, j5 = cmds[0], cmds[4]
+    assert j1.k == pytest.approx(40.0 * 1.5) and j5.k == pytest.approx(40.0)
+    # Saturated push: J1 cap 0.85 * 6 Nm, J5 cap 0.85 * 4 Nm.
+    assert abs(j1.torque(q[0])) == pytest.approx(0.85 * 6.0)
+    assert abs(j5.torque(q[4])) == pytest.approx(0.85 * 4.0)
+    # Hardest object: J1 kp stops at its own ceiling.
+    cmds = planner.plan(q, dq, {0: (1, 0.2, 80.0)})
+    assert cmds[0].k == pytest.approx(100.0)
+
+
+def test_palm_object_centre_fixed_grows_away_from_palm_and_pushes_hand_open():
+    """Resizing keeps the centre over the palm point (only moves out along the
+    normal); a growing ball gradually pushes the holding fingers open."""
+    config, mapping, specs = _palm_setup()
+    sim = Simulation(config, mapping, specs)
+    hi = np.array([m.model_rad_limits()[1] for m in mapping.motors])
+
+    def local():
+        origin, rot, *_ = sim._palm_frame()
+        return rot.T @ (sim.object_runtime[0].target_position - origin)
+
+    sizes = (0.030, 0.045, 0.060)
+    centres = []
+    for size in sizes:
+        sim.set_object_shape("ball_soft", size_m=size)
+        centres.append(local())
+    centres = np.asarray(centres)
+    assert np.allclose(centres[:, :2], centres[0, :2], atol=1e-9)    # no slide to the wrist
+    assert np.all(np.diff(centres[:, 2]) < 0)                          # out of the palm (-z)
+
+    sim.set_object_shape("ball_soft", size_m=0.035)
+    for f in np.linspace(0.0, 0.55, 40):                               # close gradually
+        sim.update_glove(f * hi)
+        sim.step(feedback_enabled=True, dt_s=0.01)
+    q_before = sim.sim_q().copy()
+    tau_before = sim.proxy_feedback_torque().copy()
+    # Grow it with the async path the UI uses (compile/compute off the lock).
+    specs_new = sim.specs_with("ball_soft", size_m=0.055)
+    req = sim.set_object_shape("ball_soft", size_m=0.055,
+                               prebuilt=sim.compile_specs(specs_new), refit=False)
+    assert req is not None and sim._blocked                            # still held meanwhile
+    assert sim.refit_apply(sim.refit_compute(req))
+    held = sorted(sim._blocked)
+    assert held and all(sim._surface_goal.get(i, sim._blocked[i][1]) < q_before[i] for i in held)
+    # Not a kick: right after the refit the surfaces have not moved yet.
+    assert np.allclose(sim.proxy_feedback_torque()[held], tau_before[held], atol=1e-6)
+    for _ in range(60):
+        sim.update_glove(0.55 * hi)
+        sim.step(feedback_enabled=True, dt_s=0.01)
+        time.sleep(0.005)
+    q_after = sim.sim_q()
+    tau_after = sim.proxy_feedback_torque()
+    opened = q_before[held] - q_after[held]                            # visible fingers opened
+    assert np.all(opened > math.radians(0.5)) and opened.mean() > math.radians(3)
+    assert np.all(tau_after[held] < tau_before[held] - 0.05)           # pushing harder (opening = -)
+
+
+def test_palm_object_rotates_about_palm_normal():
+    config, mapping, specs = _palm_setup()
+    sim = Simulation(config, mapping, specs)
+    sim.select_object("box_hard")
+    obj = sim.object_runtime[0]
+    origin, rot, _f, normal, _l = sim._palm_frame()
+    centre = obj.target_position.copy()
+    q0 = obj.target_quat.copy()
+    sim.set_palm_yaw("box_hard", math.radians(30))
+    assert sim.palm_yaw() == pytest.approx(math.radians(30))
+    assert np.allclose(obj.target_position, centre, atol=1e-9)
+    rel = np.zeros(4)
+    mujoco.mju_mulQuat(rel, obj.target_quat, np.array([q0[0], -q0[1], -q0[2], -q0[3]]))
+    angle = 2 * math.acos(min(1.0, abs(rel[0])))
+    axis = rel[1:] / max(1e-12, np.linalg.norm(rel[1:]))
+    assert angle == pytest.approx(math.radians(30), abs=1e-6)
+    assert abs(abs(float(axis @ normal)) - 1.0) < 1e-6
+    sim.reset_object_poses()
+    assert sim.palm_yaw() == 0.0

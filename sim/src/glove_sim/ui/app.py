@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -27,8 +28,14 @@ RENDER_W = 1280
 RENDER_H = 720
 IMAGE_W = 760
 IMAGE_H = 428
-PLOT_HISTORY = 1400
+# Curves get one sample per control tick (runner.plot_samples, ~100 Hz);
+# PLOT_HZ is only how often the plot widgets are redrawn.
+PLOT_HISTORY = 6000
 PLOT_HZ = 10.0
+SAMPLE_HZ = 100.0
+# Max points per series sent to a plot; denser windows are reduced to a
+# per-bucket min/max envelope so peaks and oscillations are never dropped.
+PLOT_MAX_POINTS = 1600
 DEFAULT_TIME_SPAN_S = 10.0
 FEEDBACK_MODES = {"driver_impedance": "驱动器阻抗（推荐）", "proxy_spring": "外置弹簧（旧）"}
 FINGER_CN = {"thumb": "拇指", "index": "食指", "middle": "中指", "ring": "无名指", "pinky": "小指"}
@@ -126,12 +133,31 @@ class App:
         self._fullscreen = False
         self._windowed_client = (1400, 980)
         self._pending_window_size: tuple[int, int] | None = None
-        self.selected = self.runner.specs[0].name if self.runner.specs else ""
+        self.selected = (self.sim.active_object if self.sim.palm_mode
+                         else (self.runner.specs[0].name if self.runner.specs else ""))
         self.pending: dict[str, dict[str, float]] = {}
+        self._pending_select: str | None = None
+        self._show_collision = False
+        self._ui_fps = 0.0
+        self._ui_last_t: float | None = None
         self._last_rebuild = 0.0
+        # Object edits (select / size / hardness / rotation) run on a worker
+        # thread: compiling the scene (~0.1 s) and refitting the holding hand
+        # (~50 ms) happen without the runner lock and without blocking the UI;
+        # only the state swaps take the lock for ~1 ms.
+        self._edit_cv = threading.Condition()
+        self._edit_queue: dict[str, object] = {}
+        self._edit_stop = False
+        self._edit_busy = False
+        self._rotating: str | None = None
+        self._rotate_last_x = 0.0
+        self._yaw_target: float | None = None
+        self._edit_thread = threading.Thread(target=self._edit_worker, name="object-edit", daemon=True)
+        self._edit_thread.start()
         self._last_status = 0.0
         self._syncing = False
         self._recording_path = ""
+        self._last_session: str | None = None
         self._last_error = ""
         self._build_ui()
 
@@ -223,7 +249,8 @@ class App:
                     "mvPlotCol_AxisText": C_MUTED,
                     "mvPlotCol_AxisGrid": (31, 43, 58, 255),
                     "mvPlotCol_AxisTick": (53, 68, 87, 255),
-                    "mvPlotCol_Line": C_ACCENT,
+                    # No global mvPlotCol_Line: it painted every series the
+                    # same colour.  Series get explicit per-joint/finger themes.
                 }
                 for name, rgba in plot_colors.items():
                     tag = getattr(dpg, name, None)
@@ -256,19 +283,31 @@ class App:
         self._line_sim = line_theme(C_ACCENT)
         self._line_cmd = line_theme(C_GREEN, 1.5)
         self._line_real = line_theme(C_GOLD)
+        self._line_sent = line_theme((190, 140, 255, 255), 1.5)
+        palette = [(78, 201, 255), (255, 192, 92), (105, 225, 167), (255, 107, 107),
+                   (190, 140, 255), (255, 140, 200), (120, 230, 230), (230, 230, 110),
+                   (255, 160, 60), (140, 170, 255), (170, 255, 120), (255, 215, 180)]
+        self._joint_themes = [line_theme((*c, 255), 1.8) for c in palette]
+        # Same hue, thin and translucent: the sim-hand twin of a joint curve.
+        self._joint_sim_themes = [line_theme((*c, 120), 1.0) for c in palette]
+
+    def _current_label(self, text: str) -> str:
+        """Fake-glove currents are synthesised (torque / Kt), say so."""
+        if type(self.runner.glove).__name__ == "FakeGlove":
+            return f"{text}（假手套模拟）"
+        return text
 
     def _build_ui(self) -> None:
         assert dpg is not None
         self._install_theme()
         with dpg.texture_registry(show=False):
-            blank = np.zeros((RENDER_H, RENDER_W, 4), dtype=np.float32)
-            blank[:, :, 3] = 1.0
-            # Reuse one RGBA buffer for every upload instead of allocating and
-            # filling ~15 MB per frame; at 1280x720 that allocation was a
-            # visible share of the UI frame time.
-            self._texture_buf = blank
-            self._texture = dpg.add_dynamic_texture(
-                RENDER_W, RENDER_H, blank.ravel().tolist(), tag="scene_texture",
+            # Raw float RGB texture: DearPyGui references the array instead
+            # of copying it, and the render process already writes float32
+            # RGB into shared memory -- no per-frame conversion or copy here.
+            self._blank_texture = np.zeros((RENDER_H, RENDER_W, 3), dtype=np.float32)
+            self._texture = dpg.add_raw_texture(
+                RENDER_W, RENDER_H, self._blank_texture, format=dpg.mvFormat_Float_rgb,
+                tag="scene_texture",
             )
         with dpg.window(tag="main", no_title_bar=True, no_resize=False):
             with dpg.group(horizontal=True):
@@ -277,8 +316,12 @@ class App:
                     with dpg.group(horizontal=True):
                         dpg.add_text("MOTORHAND", color=C_ACCENT)
                         dpg.add_text("手套力反馈仿真", color=C_TEXT)
-                        dpg.add_text("  |  左键拖动物体  ·  Shift+左键旋转  ·  右键旋转视角  ·  "
-                                     "滚轮缩放  ·  F11 全屏", wrap=650, color=C_MUTED)
+                        hint = ("  |  物体固定在手心，握拳即可接触  ·  物体上右键拖动=旋转物体  ·  "
+                                "空白处右键=旋转视角  ·  "
+                                "滚轮缩放  ·  F11 全屏") if self.sim.palm_mode else (
+                                "  |  左键拖动物体  ·  Shift+左键旋转  ·  右键旋转视角  ·  "
+                                "滚轮缩放  ·  F11 全屏")
+                        dpg.add_text(hint, wrap=650, color=C_MUTED)
                     dpg.add_spacer(height=4)
                     dpg.add_image("scene_texture", width=IMAGE_W, height=IMAGE_H, tag="scene_image")
                 with dpg.child_window(tag="control_panel", width=430, height=620, border=True):
@@ -286,19 +329,25 @@ class App:
                     dpg.add_text("", tag="source_text", color=C_ACCENT)
                     dpg.add_text("", tag="status_text", color=C_TEXT)
                     dpg.add_separator()
-                    dpg.add_text("物体参数  ·  实时重建 10 Hz", color=C_GOLD)
-                    names = [s.name for s in self.runner.specs]
-                    dpg.add_combo(names, default_value=self.selected, label="物体",
-                                  tag="object_combo", callback=self._locked(self._on_select))
+                    dpg.add_text("手心物体  ·  实时重建 10 Hz" if self.sim.palm_mode
+                                 else "物体参数  ·  实时重建 10 Hz", color=C_GOLD)
+                    names = [s.display_name for s in self.runner.specs]
+                    selected_spec = self._selected_spec()
+                    dpg.add_combo(names, default_value=selected_spec.display_name if selected_spec else "",
+                                  label="物体", tag="object_combo", callback=self._locked(self._on_select))
                     size_lo, size_hi = self._size_range(self._selected_spec())
-                    dpg.add_slider_float(label="大小 mm", default_value=30.0,
+                    dpg.add_slider_float(label="大小 mm", default_value=float(
+                                             selected_spec.size_m * 1000.0 if selected_spec else 30.0),
                                          min_value=size_lo * 1000, max_value=size_hi * 1000,
                                          tag="size_slider", callback=self._locked(self._on_size))
-                    dpg.add_slider_float(label="硬度 0..1", default_value=0.25,
+                    dpg.add_slider_float(label="硬度 0..1", default_value=float(
+                                             selected_spec.stiffness if selected_spec else 0.25),
                                          min_value=float(self.config["objects"]["stiffness_range"][0]),
                                          max_value=float(self.config["objects"]["stiffness_range"][1]),
                                          tag="stiff_slider", callback=self._locked(self._on_stiff))
-                    dpg.add_text("硬度越高，接触越硬、形变越小；只有 ball_soft 是柔性晶格。",
+                    dpg.add_text("大小 = 直径/边长；改大小后自动重新放到手心。硬度越高，接触越硬、"
+                                 "形变越小；只有软球是柔性晶格。" if self.sim.palm_mode else
+                                 "硬度越高，接触越硬、形变越小；只有软球是柔性晶格。",
                                  wrap=400, color=C_MUTED)
                     if self._proxy_mode:
                         dpg.add_combo(list(FEEDBACK_MODES.values()),
@@ -314,6 +363,10 @@ class App:
                             min_value=0.0, max_value=2.0, tag="friction_slider",
                             enabled=self._feedback_mode() == "driver_impedance",
                             callback=self._locked(self._on_friction))
+                        dpg.add_slider_float(label="J1 拇指根力度 ×", default_value=self._j1_gain_value(),
+                            min_value=0.5, max_value=3.0, tag="j1_gain_slider",
+                            enabled=self._feedback_mode() == "driver_impedance",
+                            callback=self._locked(self._on_j1_gain))
                         dpg.add_text("按进越深力越大，硬度决定刚度；上限与急停始终生效。",
                                      wrap=400, color=C_MUTED)
                     else:
@@ -330,7 +383,11 @@ class App:
                                      tag="feedback_check", callback=self._locked(self._on_feedback))
                     dpg.add_checkbox(label="锁定物体（关闭后手套可推动/带动）",
                                      default_value=bool(self.sim.objects_locked),
+                                     show=not self.sim.palm_mode,
                                      tag="lock_check", callback=self._locked(self._on_lock))
+                    dpg.add_checkbox(label="显示碰撞体 / 接触点 / 接触力",
+                                     default_value=False, tag="collision_check",
+                                     callback=self._locked(self._on_show_collision))
                     dpg.add_checkbox(label="暂停假手套演示（方便摆放物体）",
                                      default_value=False,
                                      tag="demo_check", callback=self._locked(self._on_demo))
@@ -339,13 +396,16 @@ class App:
                                        callback=self._locked(self._on_record))
                         dpg.add_button(label="急停 / 清零", tag="stop_button", width=180,
                                        callback=self._locked(self._on_stop))
+                    dpg.add_button(label="回放分析最近的记录", tag="review_button", width=368,
+                                   callback=self._on_review)
                     with dpg.group(horizontal=True):
                         dpg.add_button(label="默认视角", width=180, callback=self._locked(self._reset_camera))
                         dpg.add_button(label="全屏 F11", width=180, callback=self._locked(self._toggle_fullscreen))
                     with dpg.group(horizontal=True):
                         dpg.add_button(label="聚焦", width=115, callback=self._locked(self._on_focus))
-                        dpg.add_button(label="放到指尖", width=115, callback=self._locked(self._on_place))
-                        dpg.add_button(label="重置物体", width=115,
+                        dpg.add_button(label="放到指尖", width=115, show=not self.sim.palm_mode,
+                                       callback=self._locked(self._on_place))
+                        dpg.add_button(label="放回手心" if self.sim.palm_mode else "重置物体", width=115,
                                        callback=self._locked(self._on_reset_objects))
                     with dpg.collapsing_header(label="来源与限制", default_open=False):
                         dpg.add_text(
@@ -381,12 +441,14 @@ class App:
                                 dpg.add_plot_legend(outside=True, location=dpg.mvPlot_Location_North, horizontal=True)
                                 dpg.add_plot_axis(dpg.mvXAxis, tag="cmp_torque_x")
                                 with dpg.plot_axis(dpg.mvYAxis, label="力矩 Nm", tag="cmp_torque_y"):
-                                    dpg.add_line_series([], [], label="仿真交互",
+                                    dpg.add_line_series([], [], label="虚拟弹簧(计算)",
                                                         tag="cmp_tau_sim")
-                                    dpg.add_line_series([], [], label="反馈指令(电机输出)",
+                                    dpg.add_line_series([], [], label="驱动器输出(推算)",
                                                         tag="cmp_tau_cmd")
-                                    dpg.add_line_series([], [], label="实发电机(电机轴)",
+                                    dpg.add_line_series([], [], label="下发指令(计算)",
                                                         tag="cmp_tau_sent")
+                                    dpg.add_line_series([], [], label="电流×Kt(实测估计)",
+                                                        tag="cmp_tau_meas")
                             with dpg.plot(label="位置 (rad)", height=220, width=450, no_title=True,
                                           tag="cmp_pos_plot"):
                                 dpg.add_plot_legend(outside=True, location=dpg.mvPlot_Location_North, horizontal=True)
@@ -396,14 +458,18 @@ class App:
                                                         tag="cmp_q_sim")
                                     dpg.add_line_series([], [], label="真机编码器",
                                                         tag="cmp_q_real")
+                                    dpg.add_scatter_series([], [], label="超出标定范围",
+                                                           tag="cmp_q_clamp")
                             with dpg.plot(label="电流 (A)", height=220, width=450, no_title=True,
                                           tag="cmp_cur_plot"):
                                 dpg.add_plot_legend(outside=True, location=dpg.mvPlot_Location_North, horizontal=True)
                                 dpg.add_plot_axis(dpg.mvXAxis, tag="cmp_cur_x")
                                 with dpg.plot_axis(dpg.mvYAxis, label="电流 A", tag="cmp_cur_y"):
-                                    dpg.add_line_series([], [], label="实测电流", tag="cmp_cur_real")
+                                    dpg.add_line_series([], [], label=self._current_label("实测电流"),
+                                                        tag="cmp_cur_real")
                         for tag, theme in (("cmp_tau_sim", self._line_sim), ("cmp_tau_cmd", self._line_cmd),
-                                           ("cmp_tau_sent", self._line_real), ("cmp_q_sim", self._line_sim),
+                                           ("cmp_tau_sent", self._line_sent), ("cmp_tau_meas", self._line_real),
+                                           ("cmp_q_sim", self._line_sim),
                                            ("cmp_q_real", self._line_real), ("cmp_cur_real", self._line_real)):
                             dpg.bind_item_theme(tag, theme)
                     with dpg.tab(label="力 / 力矩 / 关节"):
@@ -434,7 +500,7 @@ class App:
                                                             tag=f"q_line_{i+1}")
                     with dpg.tab(label="电流 / 力-位移 / 时延"):
                         with dpg.group(horizontal=True):
-                            with dpg.plot(label="电流 (A, 真机实测/假手套代理)", height=250, width=450,
+                            with dpg.plot(label=self._current_label("电流 (A, 每指最大)"), height=250, width=450,
                                           tag="current_plot"):
                                 dpg.add_plot_legend()
                                 dpg.add_plot_axis(dpg.mvXAxis, label="t (s)", tag="current_x")
@@ -457,16 +523,27 @@ class App:
                                 with dpg.plot_axis(dpg.mvYAxis, label="ms", tag="lat_y"):
                                     dpg.add_line_series([], [], label="sensor age", tag="lat_line")
                     with dpg.tab(label="速度 / 保持"):
-                        with dpg.plot(label="仿真关节速度 (rad/s)", height=250, width=1380,
-                                      tag="qd_plot"):
+                        with dpg.plot(label="关节速度 (rad/s)：粗线 Jn = 真机编码器估计（阻尼/摩擦补偿所用），"
+                                            "细线 Jn 仿真 = 仿真手；点图例可隐藏", height=250, width=1380, tag="qd_plot"):
                             dpg.add_plot_legend()
                             dpg.add_plot_axis(dpg.mvXAxis, label="t (s)", tag="qd_x")
                             with dpg.plot_axis(dpg.mvYAxis, label="rad/s", tag="qd_y"):
                                 for i in range(12):
                                     dpg.add_line_series([], [], label=f"J{i+1}",
                                                         tag=f"qd_line_{i+1}")
+                                for i in range(12):
+                                    dpg.add_line_series([], [], label=f"J{i+1} 仿真",
+                                                        tag=f"qd_sim_line_{i+1}")
                         dpg.add_text("保持/滑移状态见右侧状态栏；滑移在物体锁定模式下不可用。",
                                      color=C_MUTED)
+        for i, finger in enumerate(FINGERS + ("palm",)):
+            for prefix in ("force_line_", "torque_line_", "current_line_"):
+                if dpg.does_item_exist(prefix + finger):
+                    dpg.bind_item_theme(prefix + finger, self._joint_themes[i])
+        for i in range(12):
+            dpg.bind_item_theme(f"q_line_{i+1}", self._joint_themes[i])
+            dpg.bind_item_theme(f"qd_line_{i+1}", self._joint_themes[i])
+            dpg.bind_item_theme(f"qd_sim_line_{i+1}", self._joint_sim_themes[i])
         with dpg.handler_registry():
             dpg.add_mouse_wheel_handler(callback=self._locked(self._on_wheel))
             dpg.add_mouse_double_click_handler(button=dpg.mvMouseButton_Left,
@@ -528,7 +605,22 @@ class App:
         py = (1.0 - float(rel @ up) / (depth * tan_v)) * 0.5 * RENDER_H
         return px, py, depth
 
+    def _hit_object(self, image_x: float, image_y: float) -> bool:
+        """Is the cursor over the (palm) object's projected silhouette?"""
+        for obj in self.sim.object_runtime:
+            proj = self._project(obj.target_position)
+            if proj is None:
+                continue
+            px, py, depth = proj
+            _pos, _f, _r, _u, tan_v = self._camera_basis()
+            radius_px = self.sim.bounding_radius(obj.spec) / (depth * tan_v) * 0.5 * RENDER_H
+            if math.hypot(image_x - px, image_y - py) <= max(25.0, 1.1 * radius_px):
+                return True
+        return False
+
     def _pick(self, image_x: float, image_y: float) -> str | None:
+        if self.sim.palm_mode:
+            return None  # the palm object is fixed; no mouse dragging
         best = None
         # The offscreen camera's horizontal principal point differs slightly
         # from the analytic projection, so use a generous radius and pick the
@@ -549,13 +641,24 @@ class App:
     def _size_range(self, spec) -> tuple[float, float]:
         """Allowed size (m) for an object; spheres may be larger than the rest."""
         objects = self.config["objects"]
+        if self.sim.palm_mode and (objects.get("palm") or {}).get("size_range_m"):
+            lo, hi = objects["palm"]["size_range_m"]
+            return float(lo), float(hi)
         default = objects["size_range_m"]
         by_shape = objects.get("size_range_m_by_shape") or {}
         lo, hi = by_shape.get(getattr(spec, "shape", ""), default)
         return float(lo), float(hi)
 
     def _on_select(self, sender, app_data) -> None:
-        self.selected = str(app_data)
+        label = str(app_data)
+        spec = next((s for s in self.runner.specs if s.display_name == label or s.name == label), None)
+        if spec is None:
+            return
+        self.selected = spec.name
+        if self.sim.palm_mode:
+            # Swapping the object recompiles the scene; do it in the UI loop
+            # together with the renderer rebuild.
+            self._pending_select = spec.name
         for spec in self.runner.specs:
             if spec.name == self.selected:
                 self._syncing = True
@@ -596,6 +699,22 @@ class App:
         else:
             glove["feedback_gain"] = float(app_data)
 
+    def _joint_gains(self) -> list[float]:
+        cfg = self.config["glove"].setdefault("driver_impedance", {})
+        jg = np.asarray(cfg.get("joint_gain", 1.0), dtype=float).reshape(-1)
+        gains = [float(jg[0])] * 12 if jg.size == 1 else [float(v) for v in jg]
+        cfg["joint_gain"] = gains
+        return gains
+
+    def _j1_gain_value(self) -> float:
+        return self._joint_gains()[0]
+
+    def _on_j1_gain(self, sender, app_data) -> None:
+        gains = self._joint_gains()
+        gains[0] = float(app_data)
+        # New list object so the session recorder logs the change as an event.
+        self.config["glove"]["driver_impedance"]["joint_gain"] = list(gains)
+
     def _on_friction(self, sender, app_data) -> None:
         self.config["glove"].setdefault("friction_comp", {})["gain"] = float(app_data)
 
@@ -606,6 +725,7 @@ class App:
         self.sim._blocked.clear()
         dpg.set_value("gain_slider", self._gain_value())
         dpg.configure_item("friction_slider", enabled=mode == "driver_impedance")
+        dpg.configure_item("j1_gain_slider", enabled=mode == "driver_impedance")
 
     def _on_feedback(self, sender, app_data) -> None:
         try:
@@ -622,6 +742,9 @@ class App:
             self._last_error = "" if app_data else "物体已解锁：可被手套推动/带动"
         except Exception as error:
             self._last_error = f"切换物体锁定失败: {error}"
+
+    def _on_show_collision(self, sender, app_data) -> None:
+        self._show_collision = bool(app_data)
 
     def _on_demo(self, sender, app_data) -> None:
         # The checkbox is labelled "暂停假手套演示", so checked means paused;
@@ -701,18 +824,42 @@ class App:
         dpg.set_value("feedback_check", False)
         self._last_error = self.runner.stats.error
 
+    def _record_dir(self) -> Path:
+        directory = Path(self.config.get("telemetry", {}).get("default_dir", "data"))
+        if not directory.is_absolute():
+            directory = Path(self.config.get("_sim_root", ".")) / directory
+        return directory
+
     def _on_record(self, sender, app_data) -> None:
-        if not self.runner.telemetry.recording:
-            directory = self.config.get("telemetry", {}).get("default_dir", "data")
+        if self.runner.recorder is None:
             try:
-                path = self.runner.start_recording(directory)
+                path = self.runner.start_recording(str(self._record_dir()))
                 self._recording_path = path
+                self._last_session = path
                 dpg.configure_item("record_button", label="停止记录")
             except Exception as error:
                 self._last_error = f"记录失败: {error}"
         else:
-            self.runner.stop_recording()
+            path = self.runner.stop_recording()
+            if path:
+                self._last_session = path
+                self._recording_path = f"{path}（已保存）"
             dpg.configure_item("record_button", label="开始记录")
+
+    def _on_review(self, sender=None, app_data=None) -> None:
+        """Open the review window for the newest (or current) session in a new process."""
+        import subprocess
+        import sys
+        from ..recording import latest_session
+        path = self._last_session or latest_session(self._record_dir())
+        if not path:
+            self._last_error = "还没有记录：先点“开始记录”，操作一会儿再停止"
+            return
+        if self.runner.recorder is not None and str(self.runner.recorder.path) == str(path):
+            # Reviewing a session that is still being written: flush what we have.
+            self._last_error = "正在记录中：回放只包含已写入的部分（约 1 秒延迟）"
+        subprocess.Popen([sys.executable, "-m", "glove_sim.cli", "review", str(path)],
+                         start_new_session=True)
 
     def _on_wheel(self, sender, app_data) -> None:
         plot = self._hovered_plot()
@@ -740,7 +887,7 @@ class App:
         x_tag, y_tag, is_time = PLOT_AXES[plot]
         factor = math.exp(-0.15 * wheel)  # wheel up = zoom in
         if self._ctrl_down() and is_time:
-            max_span = PLOT_HISTORY / PLOT_HZ
+            max_span = PLOT_HISTORY / SAMPLE_HZ
             self._time_span = float(min(max_span, max(0.5, self._time_span * factor)))
             return
         tag, coord = (x_tag, 0) if self._ctrl_down() else (y_tag, 1)
@@ -794,31 +941,81 @@ class App:
 
     # ------------------------------------------------------------------
     def _apply_pending(self) -> None:
-        if not self.pending:
+        """Hand the latest object edits to the worker (never blocks the UI)."""
+        edits: dict[str, object] = {}
+        if self._pending_select is not None:
+            edits["select"], self._pending_select = self._pending_select, None
+        if self.pending:
+            now = time.monotonic()
+            hz = float(self.config.get("objects", {}).get("rebuild_hz", 10.0))
+            if now - self._last_rebuild >= 1.0 / max(1.0, hz):
+                self._last_rebuild = now
+                edits["shape"] = {k: dict(v) for k, v in self.pending.items()}
+                self.pending.clear()
+        if self._yaw_target is not None:
+            edits["yaw"] = (self.selected, self._yaw_target)
+            self._yaw_target = None
+        if not edits:
             return
-        now = time.monotonic()
-        hz = float(self.config.get("objects", {}).get("rebuild_hz", 10.0))
-        if now - self._last_rebuild < 1.0 / max(1.0, hz):
-            return
-        self._last_rebuild = now
-        for name, changes in list(self.pending.items()):
+        with self._edit_cv:
+            for key, value in edits.items():
+                if key == "shape":
+                    merged = dict(self._edit_queue.get("shape") or {})
+                    for name, changes in value.items():
+                        merged.setdefault(name, {}).update(changes)
+                    self._edit_queue["shape"] = merged
+                else:
+                    self._edit_queue[key] = value   # only the latest matters
+            self._edit_cv.notify()
+
+    def _edit_worker(self) -> None:
+        lock = self.runner.lock
+        sim = self.sim
+        while True:
+            with self._edit_cv:
+                while not self._edit_queue and not self._edit_stop:
+                    self._edit_cv.wait(0.5)
+                if self._edit_stop:
+                    return
+                queue, self._edit_queue = self._edit_queue, {}
+                self._edit_busy = True
             try:
-                self.sim.set_object_shape(
-                    name,
-                    size_m=changes.get("size_m"),
-                    stiffness=changes.get("stiffness"),
-                )
-                if changes.get("size_m") is not None:
-                    # A grown object must not overlap its neighbours.
-                    obj = next(o for o in self.sim.object_runtime if o.name == name)
-                    pos = self.sim.free_position(name, obj.target_position)
-                    if not np.allclose(pos, obj.target_position):
-                        self.sim.set_object_pose(name, position=pos)
+                reqs = []
+                name = queue.get("select")
+                if name is not None:
+                    spec = next((sp for sp in sim.catalog if sp.name == name), None)
+                    if spec is not None:
+                        prebuilt = sim.compile_specs([spec])          # no lock
+                        with lock:
+                            reqs.append(sim.select_object(name, prebuilt=prebuilt, refit=False))
+                for name, changes in (queue.get("shape") or {}).items():
+                    specs = sim.specs_with(name, size_m=changes.get("size_m"),
+                                           stiffness=changes.get("stiffness"))
+                    prebuilt = sim.compile_specs(specs) if specs is not None else None
+                    with lock:
+                        reqs.append(sim.set_object_shape(
+                            name, size_m=changes.get("size_m"), stiffness=changes.get("stiffness"),
+                            prebuilt=prebuilt, refit=False))
+                        if changes.get("size_m") is not None and not sim.palm_mode:
+                            # A grown object must not overlap its neighbours.
+                            obj = next(o for o in sim.object_runtime if o.name == name)
+                            pos = sim.free_position(name, obj.target_position)
+                            if not np.allclose(pos, obj.target_position):
+                                sim.set_object_pose(name, position=pos)
+                if queue.get("yaw") is not None:
+                    name, yaw = queue["yaw"]
+                    with lock:
+                        reqs.append(sim.set_palm_yaw(name, yaw, refit=False))
+                req = next((r for r in reversed(reqs) if r is not None), None)
+                if req is not None:
+                    res = sim.refit_compute(req)                       # no lock
+                    with lock:
+                        sim.refit_apply(res)
+                self._last_error = ""
             except Exception as error:
-                self._last_error = f"重建 {name} 失败: {error}"
-        self.pending.clear()
-        if self.sim.model is not self._model_ref:
-            self._rebuild_renderer()
+                self._last_error = f"修改物体失败: {error}"
+            finally:
+                self._edit_busy = False
 
     def _mouse(self) -> None:
         left = bool(dpg.is_mouse_button_down(dpg.mvMouseButton_Left))
@@ -837,11 +1034,16 @@ class App:
         local_x = (mx - rect_min[0]) * RENDER_W / rect_w
         local_y = (my - rect_min[1]) * RENDER_H / rect_h
 
-        # Right button orbits the camera.  It never picks or moves objects.
+        # Right button: pressed on the palm object -> rotate it about the palm
+        # normal (horizontal drag, 0.5 deg/px); anywhere else -> orbit camera.
         if right:
             if not self._right_down:
                 self._right_down = True
                 self._right_last = (mx, my)
+                self._rotating = None
+                if self.sim.palm_mode and inside and self._hit_object(local_x, local_y):
+                    self._rotating = self.sim.active_object
+                    self._rotate_last_x = mx
                 # Cancel a left-button object drag so both gestures cannot
                 # fight over the same mouse delta.
                 if self._mouse_down:
@@ -851,6 +1053,12 @@ class App:
                     self._drag_name = None
                     self._drag_mode = None
                     self._last_mouse = None
+            elif self._rotating is not None:
+                dx = mx - self._rotate_last_x
+                if abs(dx) >= 1.0:
+                    base = self._yaw_target if self._yaw_target is not None else self.sim.palm_yaw(self._rotating)
+                    self._yaw_target = base + math.radians(0.5 * dx)
+                    self._rotate_last_x = mx
             elif self._right_last is not None:
                 dx = mx - self._right_last[0]
                 dy = my - self._right_last[1]
@@ -860,6 +1068,7 @@ class App:
         else:
             self._right_down = False
             self._right_last = None
+            self._rotating = None
 
         # Left button only moves/rotates a picked object.  A left drag on empty
         # space does nothing (orbit is right-button only now).
@@ -960,96 +1169,116 @@ class App:
         if self.renderer is None or self.sim.model is not self._model_ref:
             self._rebuild_renderer()
         assert self.renderer is not None
+        # Pipelined: every UI frame collects a finished image (if any) and
+        # immediately queues the next one, so the renderer is never idle.
+        # (The old 30 Hz gate requested on one frame and collected on a later
+        # one, which capped the scene at ~15 Hz with 30-60 ms extra age.)
+        # Only the state snapshot needs the runner lock; the caller holds it
+        # just for this call, and the texture swap below is lock-free.
         try:
             img = self.renderer.poll()
-            if img is None:
-                self.renderer.request(self.sim.xml, self.sim.data.qpos, self.sim.data.qvel,
-                                      self.cam, RENDER_W, RENDER_H,
-                                      highlight=self._highlight_payload())
-                return
+            self.renderer.request(self.sim.xml, self.sim.data.qpos, self.sim.data.qvel,
+                                  self.cam, RENDER_W, RENDER_H,
+                                  highlight=self._highlight_payload(),
+                                  show_collision=self._show_collision)
         except Exception as error:
             self._last_error = f"图像渲染失败: {error}"
             return
-        # MuJoCo's Renderer already returns a top-down image (it flips the
-        # OpenGL readback internally).  Do not flip again: the old extra
-        # `img[::-1]` displayed the scene upside down and broke picking.
-        rgba = self._texture_buf
-        np.divide(img, 255.0, out=rgba[:, :, :3], casting="unsafe")
-        flat = rgba.reshape(-1)
-        try:
-            # Newer DPG builds accept a contiguous float32 buffer directly;
-            # this avoids a ~30 ms Python list conversion at 960x540.
-            dpg.set_value("scene_texture", flat)
-        except (TypeError, ValueError):
-            dpg.set_value("scene_texture", flat.tolist())
+        if img is not None and img.shape[:2] == (RENDER_H, RENDER_W):
+            # MuJoCo's Renderer already returns a top-down image; do not flip.
+            dpg.set_value("scene_texture", img)
 
     def _update_history(self) -> None:
-        r = self.runner.result
-        if r is None:
-            return
-        t = (r.timestamp_ns / 1e9) - self._t0
-        forces = [float(r.finger_force_n.get(f, 0.0)) for f in FINGERS + ("palm",)]
-        torques = [float(v) for v in r.torque_cmd_nm]
-        q = [float(v) for v in r.sim_q]
-        qd = [float(v) for v in r.sim_dq]
-        pens = [float(r.finger_penetration_m.get(f, 0.0)) for f in FINGERS]
-        age = 0.0
-        try:
-            age = float(self.runner.telemetry.ring.latency[-1])
-        except Exception:
-            pass
-        currents = [float(self.runner.state.current_a.get(i + 1, float("nan")))
-                    if self.runner.state is not None else float("nan") for i in range(12)]
-        raw = [float(v) for v in r.torque_raw_nm]
-        sent = [float(v) for v in self.runner.sent_torque_nm]
-        state = self.runner.state
-        real_q = ([float(v) for v in state.angles_rad] if state is not None
-                  else [float("nan")] * 12)
-        self._history.append((t, forces, torques, q, pens, float(r.max_object_disp_m),
-                              r.contact_count, age, currents, qd, raw, sent, real_q))
+        """Move the per-tick samples recorded by the control loop into the plot history."""
+        samples = self.runner.plot_samples
+        while samples:
+            self._history.append(samples.popleft())
+
+    @staticmethod
+    def _envelope(xs: np.ndarray, ys: np.ndarray, max_points: int) -> tuple[np.ndarray, np.ndarray]:
+        """Reduce a dense series to per-bucket (min, max) pairs, keeping every peak."""
+        n = xs.size
+        if n <= max_points:
+            return xs, ys
+        buckets = max(1, max_points // 2)
+        edges = np.linspace(0, n, buckets + 1).astype(int)
+        out_x = np.empty(2 * buckets)
+        out_y = np.empty(2 * buckets)
+        for b in range(buckets):
+            a, e = edges[b], max(edges[b] + 1, edges[b + 1])
+            seg = ys[a:e]
+            finite = np.isfinite(seg)
+            if not finite.any():
+                out_x[2 * b:2 * b + 2] = xs[a]
+                out_y[2 * b:2 * b + 2] = np.nan
+                continue
+            i_lo = a + int(np.nanargmin(seg))
+            i_hi = a + int(np.nanargmax(seg))
+            first, second = sorted((i_lo, i_hi))
+            out_x[2 * b], out_y[2 * b] = xs[first], ys[first]
+            out_x[2 * b + 1], out_y[2 * b + 1] = xs[second], ys[second]
+        return out_x, out_y
 
     def _update_plots(self) -> None:
         hist = self._frozen_hist if self._plots_paused else list(self._history)
         if not hist:
             return
-        t = np.asarray([row[0] for row in hist], dtype=float)
+        t_all = np.asarray([row.t_ns for row in hist], dtype=float) / 1e9 - self._t0
+        # Only the visible time window is sent to the widgets.
+        first = int(np.searchsorted(t_all, t_all[-1] - self._time_span * 1.02))
+        hist = hist[first:]
+        t = t_all[first:]
         data: dict[str, list[tuple[np.ndarray, np.ndarray]]] = {}
 
-        def put(series: str, y_tag: str, xs: np.ndarray, ys) -> None:
+        def put(series: str, y_tag: str, xs: np.ndarray, ys, *, envelope: bool = True) -> None:
             ys = np.asarray(ys, dtype=float)
+            if envelope:
+                xs, ys = self._envelope(xs, ys, PLOT_MAX_POINTS)
             dpg.set_value(series, [xs.tolist(), ys.tolist()])
             data.setdefault(y_tag, []).append((xs, ys))
 
-        def col(k: int, i: int) -> np.ndarray:
-            return np.asarray([row[k][i] for row in hist], dtype=float)
+        def col(field: str, i: int | None = None) -> np.ndarray:
+            if i is None:
+                return np.asarray([getattr(row, field) for row in hist], dtype=float)
+            return np.asarray([getattr(row, field)[i] for row in hist], dtype=float)
 
-        # 仿真 vs 真机 (one motor)
+        # 仿真 vs 真机 (one motor); all torques in the model-joint frame.
         m = self._cmp_motor
-        put("cmp_tau_sim", "cmp_torque_y", t, col(10, m))
-        put("cmp_tau_cmd", "cmp_torque_y", t, col(2, m))
-        put("cmp_tau_sent", "cmp_torque_y", t, col(11, m))
-        put("cmp_q_sim", "cmp_pos_y", t, col(3, m))
-        put("cmp_q_real", "cmp_pos_y", t, col(12, m))
-        put("cmp_cur_real", "cmp_cur_y", t, col(8, m))
+        put("cmp_tau_sim", "cmp_torque_y", t, col("torque_spring_nm", m))
+        put("cmp_tau_cmd", "cmp_torque_y", t, col("torque_driver_nm", m))
+        put("cmp_tau_sent", "cmp_torque_y", t, col("torque_sent_nm", m))
+        put("cmp_tau_meas", "cmp_torque_y", t, col("torque_measured_nm", m))
+        put("cmp_q_sim", "cmp_pos_y", t, col("sim_q", m))
+        real_q = col("real_q", m)
+        put("cmp_q_real", "cmp_pos_y", t, real_q)
+        clamped = col("encoder_clamped", m) > 0.5
+        dpg.set_value("cmp_q_clamp", [t[clamped].tolist(), real_q[clamped].tolist()])
+        put("cmp_cur_real", "cmp_cur_y", t, col("current_a", m))
 
+        forces = np.asarray([row.finger_force_n for row in hist], dtype=float)
         for i, finger in enumerate(FINGERS + ("palm",)):
-            put(f"force_line_{finger}", "force_y", t, col(1, i))
+            put(f"force_line_{finger}", "force_y", t, forces[:, i])
+        torques = np.abs(np.asarray([row.torque_driver_nm for row in hist], dtype=float))
+        currents = np.abs(np.asarray([row.current_a for row in hist], dtype=float))
         finger_motor = {f: [i for i, mf in enumerate(MOTOR_FINGER) if mf == f] for f in FINGERS}
         for finger in FINGERS:
             idx = finger_motor[finger]
-            ys = [max((abs(row[2][i]) for i in idx), default=0.0) for row in hist]
-            put(f"torque_line_{finger}", "torque_y", t, ys)
-            cur = [max((abs(row[8][i]) for i in idx), default=0.0) for row in hist]
+            put(f"torque_line_{finger}", "torque_y", t, torques[:, idx].max(axis=1))
+            cur = currents[:, idx]
+            cur = np.where(np.isfinite(cur).any(axis=1), np.nanmax(np.where(np.isfinite(cur), cur, -np.inf), axis=1), np.nan)
             put(f"current_line_{finger}", "current_y", t, cur)
+        sim_q = np.asarray([row.sim_q for row in hist], dtype=float)
+        sim_dq = np.asarray([row.sim_dq for row in hist], dtype=float)
+        real_dq = np.asarray([row.real_dq for row in hist], dtype=float)
         for i in range(12):
-            put(f"q_line_{i+1}", "q_y", t, col(3, i))
-            put(f"qd_line_{i+1}", "qd_y", t, col(9, i))
-        pens = np.asarray([max(row[4], default=0.0) for row in hist], dtype=float)
-        total_force = np.asarray([sum(row[1][:5]) for row in hist], dtype=float)
-        put("disp_line", "disp_y", pens, total_force)
-        deform = np.asarray([row[5] for row in hist], dtype=float)
-        put("deform_line", "disp_y", deform, total_force)
-        put("lat_line", "lat_y", t, [row[7] for row in hist])
+            put(f"q_line_{i+1}", "q_y", t, sim_q[:, i])
+            put(f"qd_line_{i+1}", "qd_y", t, real_dq[:, i])
+            put(f"qd_sim_line_{i+1}", "qd_y", t, sim_dq[:, i])
+        pens = np.asarray([max(row.penetration_m, default=0.0) for row in hist], dtype=float)
+        total_force = forces[:, :5].sum(axis=1)
+        put("disp_line", "disp_y", pens, total_force, envelope=False)
+        put("deform_line", "disp_y", col("object_disp_m"), total_force, envelope=False)
+        put("lat_line", "lat_y", t, col("sensor_age_ms"))
         self._plot_data = data
         self._frozen_t = t
         self._apply_plot_limits(t)
@@ -1116,6 +1345,9 @@ class App:
                 mode_text += f" {len(active)} 轴接触 kp≤{max(active):.0f}"
         status.append(f"循环 {self.runner.stats.loop_hz:5.1f} Hz（tick {self.runner.stats.tick_ms:4.1f} ms）"
                       f" | 反馈: {mode_text}")
+        if self.renderer is not None:
+            status.append(f"画面 {self.renderer.frame_hz:5.1f} Hz | 渲染延迟 "
+                          f"{self.renderer.last_latency_s * 1e3:4.1f} ms | 界面 {self._ui_fps:5.1f} fps")
         try:
             lat = self.runner.telemetry.latency_stats()
             status.append(f"传感器时延 p50/p99/max = {lat['p50_ms']:.1f}/{lat['p99_ms']:.1f}/"
@@ -1124,9 +1356,23 @@ class App:
             pass
         if self.runner.stats.error:
             status.append(f"错误: {self.runner.stats.error}")
+        if self._history:
+            clamped = [f"J{i + 1}" for i, c in enumerate(self._history[-1].encoder_clamped) if c]
+            if clamped:
+                status.append(f"注意: {', '.join(clamped)} 编码器超出标定范围"
+                              "（仿真手被限位，曲线画的是未限位真值）")
         if self._last_error:
             status.append(self._last_error)
-        if self._recording_path:
+        if self.sim.palm_mode:
+            yaw = math.degrees(self.sim.palm_yaw())
+            busy = "（正在应用修改…）" if self._edit_busy else ""
+            status.append(f"物体朝向 {yaw:+.0f}°（物体上右键拖动旋转，“放回手心”复位）{busy}")
+        recorder = self.runner.recorder
+        if recorder is not None:
+            status.append(f"记录中: {recorder.path}  {recorder.ticks} 帧"
+                          f"（{recorder.ticks / max(1.0, self.runner.stats.loop_hz or 100.0):.0f} s）"
+                          + (f"  {recorder.error}" if recorder.error else ""))
+        elif self._recording_path:
             status.append(f"记录: {self._recording_path}")
         dpg.set_value("status_text", "\n".join(status))
         if state is not None:
@@ -1202,6 +1448,11 @@ class App:
 
     # ------------------------------------------------------------------
     def update(self) -> None:
+        t = time.perf_counter()
+        if self._ui_last_t is not None and t > self._ui_last_t:
+            fps = 1.0 / (t - self._ui_last_t)
+            self._ui_fps = fps if self._ui_fps <= 0 else self._ui_fps + 0.05 * (fps - self._ui_fps)
+        self._ui_last_t = t
         if self._pending_window_size is not None and not self._fullscreen:
             width, height = self._pending_window_size
             self._pending_window_size = None
@@ -1212,16 +1463,13 @@ class App:
             except Exception:
                 pass
         lock = self.runner.lock
-        with lock:
-            self._apply_pending()
+        self._apply_pending()   # queues edits for the worker; takes no lock
         self._apply_layout()
         with lock:
             self._mouse()
         now = time.monotonic()
-        if now - self._last_tex >= 1.0 / 30.0:
-            self._last_tex = now
-            with lock:
-                self._update_scene_texture()
+        with lock:
+            self._update_scene_texture()
         if now - self._last_plot >= 1.0 / PLOT_HZ:
             self._last_plot = now
             with lock:
@@ -1234,6 +1482,10 @@ class App:
                 self._update_status()
 
     def close(self) -> None:
+        with self._edit_cv:
+            self._edit_stop = True
+            self._edit_cv.notify()
+        self._edit_thread.join(timeout=3.0)
         if self.renderer is not None:
             self.renderer.close()
             self.renderer = None
@@ -1273,6 +1525,12 @@ def run_ui(runner: Runner) -> int:
                             width=1400, height=980, x_pos=40, y_pos=20,
                             resizable=True, min_width=1000, min_height=700)
         dpg.setup_dearpygui()
+        # vsync off: the UI loop runs at simulation.ui_hz instead of the
+        # monitor refresh, so each shown frame carries a fresher sim state.
+        try:
+            dpg.set_viewport_vsync(bool(runner.config["simulation"].get("ui_vsync", False)))
+        except Exception:
+            pass
         dpg.show_viewport()
         app = App(runner)
         dpg.set_primary_window("main", True)
@@ -1289,6 +1547,7 @@ def run_ui(runner: Runner) -> int:
         # The control loop (glove read -> kinematics -> contacts -> torque)
         # runs on its own fixed-rate thread; the UI only renders.
         runner.start_thread()
+        ui_hz = max(10.0, float(runner.config["simulation"].get("ui_hz", 60.0)))
         while dpg.is_dearpygui_running():
             frame_start = time.perf_counter()
             try:
@@ -1298,9 +1557,9 @@ def run_ui(runner: Runner) -> int:
                 print(f"UI 渲染失败: {error}")
                 runner.stats.error = f"UI 渲染失败: {error}"
                 break
-            # Cap at ~60 UI frames/s, but never sleep when a frame already
-            # took longer than that (at 1280x720 it usually does).
-            remaining = 1.0 / 60.0 - (time.perf_counter() - frame_start)
+            # Cap at simulation.ui_hz (the display's vsync may cap lower), but
+            # never sleep when a frame already took longer than that.
+            remaining = 1.0 / ui_hz - (time.perf_counter() - frame_start)
             if remaining > 0:
                 time.sleep(remaining)
     finally:

@@ -60,7 +60,24 @@ class Simulation:
                  specs: list[ObjectSpec]) -> None:
         self.config = config
         self.mapping = mapping
+        # Every selectable object.  In palm mode only one of them is in the
+        # scene at a time (``self.specs``), resting on the palm.
+        self.catalog = list(specs)
         self.specs = list(specs)
+        self._palm_tree_poses: tuple[np.ndarray, np.ndarray] | None = None
+        # Palm mode: object rotation about the palm normal (rad), per object.
+        self._palm_yaw: dict[str, float] = {}
+        # Contact surfaces being moved after the object changed size/pose:
+        # motor idx -> goal surface angle.  The held surface walks there at
+        # glove.surface_rate_rad_s, so the hand (sim and real) is pushed open
+        # gradually instead of jumping.
+        self._surface_goal: dict[int, float] = {}
+        self._surface_goal_t = time.monotonic()
+        self._placement_data: mujoco.MjData | None = None
+        if self.palm_mode and self.catalog:
+            wanted = str(self._palm_cfg().get("default_object", self.catalog[0].name))
+            first = next((s for s in self.catalog if s.name == wanted), self.catalog[0])
+            self.specs = [first]
         # Objects are pose-locked by default (no drift).  Unlocking lets the
         # kinematic glove push/grasp them; the UI exposes this as a checkbox.
         self.objects_locked = bool(config.get("objects", {}).get("locked_default", True))
@@ -109,6 +126,8 @@ class Simulation:
         self._ghost_raw = np.zeros(12, dtype=float)
         self._ghost_ready = False
         self._ghost_dirty = False
+        if self.palm_mode:
+            self.place_on_palm()
 
     # ------------------------------------------------------------------
     def _cache_flex_rest(self) -> None:
@@ -157,8 +176,16 @@ class Simulation:
         return result
 
     # ------------------------------------------------------------------
-    def _compile(self) -> None:
-        self.model, self.data, self.xml = compile_scene(self.config, self.mapping, self.specs)
+    def compile_specs(self, specs: list[ObjectSpec]):
+        """Compile a scene for ``specs`` without touching the live state.
+
+        Safe to call without the runner lock (MuJoCo releases the GIL while
+        compiling), so the ~0.1 s compile does not stall the control loop.
+        """
+        return compile_scene(self.config, self.mapping, specs)
+
+    def _compile(self, prebuilt=None) -> None:
+        self.model, self.data, self.xml = prebuilt or compile_scene(self.config, self.mapping, self.specs)
         self.motor_ids = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, n)
                           for n in self.mapping.model_joint_names]
         if any(i < 0 for i in self.motor_ids):
@@ -261,6 +288,7 @@ class Simulation:
         if not self.collision_clamp or not self.objects_locked:
             self._blocked.clear()
         else:
+            self._advance_surfaces()
             margin = float(self.config.get("glove", {}).get("release_margin_rad", 0.01))
             for idx, (sign, frozen, _k) in list(self._blocked.items()):
                 # Hold the visible finger at the surface while the real finger
@@ -273,6 +301,7 @@ class Simulation:
                     cmd[idx] = frozen
                 elif inside < -margin:
                     del self._blocked[idx]
+                    self._surface_goal.pop(idx, None)
                 # else: just outside -- the visible finger follows the real one
                 # and the spring is 0, but the surface is kept, so a re-press
                 # meets the same wall instead of re-freezing a new one (the
@@ -433,13 +462,17 @@ class Simulation:
         """
         tau = np.zeros(12, dtype=float)
         glove = self.config.get("glove", {})
+        joint_gain = np.ones(12)
         if self._feedback_mode() == "driver_impedance":
-            gain = float(glove.get("driver_impedance", {}).get("gain", 1.0))
+            cfg = glove.get("driver_impedance", {})
+            gain = float(cfg.get("gain", 1.0))
+            jg = np.asarray(cfg.get("joint_gain", 1.0), dtype=float).reshape(-1)
+            joint_gain = np.full(12, float(jg[0])) if jg.size == 1 else jg
         else:
             gain = float(glove.get("proxy_gain", 1.0))
         for idx, (sign, frozen, k) in self._blocked.items():
             depth = max(0.0, sign * (float(self._motor_target[idx]) - frozen))
-            tau[idx] = -sign * k * depth * gain
+            tau[idx] = -sign * k * depth * gain * float(joint_gain[idx])
         return tau
 
     def _refresh_ghost_feedback(self) -> None:
@@ -673,7 +706,13 @@ class Simulation:
         )
 
     def reset_object_poses(self) -> None:
-        """Restore every object to its configured start pose."""
+        """Restore every object to its configured start pose (palm mode: re-seat)."""
+        if self.palm_mode:
+            previous = dict(self._blocked)
+            self._palm_yaw.clear()
+            self.place_on_palm()
+            self.refit_contact_blocks(previous)
+            return
         if self._drag_name is not None:
             self.end_drag()
         for obj in self.object_runtime:
@@ -851,14 +890,35 @@ class Simulation:
                 break
         return pos
 
+    def specs_with(self, name: str, *, size_m: float | None = None,
+                   stiffness: float | None = None) -> list[ObjectSpec] | None:
+        """Copies of the scene specs with one object changed (None: not in scene)."""
+        import copy
+        if not any(s.name == name for s in self.specs):
+            return None
+        out = []
+        for spec in self.specs:
+            spec = copy.copy(spec)
+            if spec.name == name:
+                if size_m is not None:
+                    spec.size_m = float(size_m)
+                if stiffness is not None:
+                    spec.stiffness = float(stiffness)
+            out.append(spec)
+        return out
+
     def set_object_shape(self, name: str, *, size_m: float | None = None,
-                         stiffness: float | None = None) -> None:
+                         stiffness: float | None = None, prebuilt=None,
+                         refit: bool = True) -> dict[str, Any] | None:
         """Rebuild the scene with an updated object parameter.
 
         The generated scene compiles in ~0.1 s on the target machine; the UI
-        throttles this to ``objects.rebuild_hz`` (default 10 Hz).
+        throttles this to ``objects.rebuild_hz`` (default 10 Hz).  In palm
+        mode a resized object is re-seated on the palm and the holding hand
+        refitted; ``refit=False`` returns the refit request instead, for the
+        caller to run refit_compute/refit_apply outside the runner lock.
         """
-        for spec in self.specs:
+        for spec in self.catalog:
             if spec.name == name:
                 if size_m is not None:
                     spec.size_m = float(size_m)
@@ -867,26 +927,438 @@ class Simulation:
                 break
         else:
             raise KeyError(name)
+        if not any(s.name == name for s in self.specs):
+            return None  # not in the scene (palm mode); used when it is selected
+        previous = dict(self._blocked)
+        self._rebuild(prebuilt=prebuilt)
+        if self.palm_mode:
+            if size_m is not None:
+                self.place_on_palm()
+            # The hand that was holding the object now meets its new surface:
+            # a grown ball pushes the fingers (sim and real) open.
+            if not refit:
+                # Caller runs compute/apply; previous surfaces hold meanwhile.
+                return self.refit_request(previous)
+            self.refit_contact_blocks(previous)
+        return None
+
+    def _rebuild(self, *, keep_object_poses: bool = True, prebuilt=None) -> None:
+        """Recompile the scene from ``self.specs``, keeping the glove state."""
+        if self._drag_name is not None:
+            self.end_drag()
         old_q = {self.model.joint(i).name: float(self.data.qpos[self.model.jnt_qposadr[i]])
                  for i in range(self.model.njnt)}
         old_dq = {self.model.joint(i).name: float(self.data.qvel[self.model.jnt_dofadr[i]])
                   for i in range(self.model.njnt)}
         old_poses = {o.name: (o.target_position.copy(), o.target_quat.copy()) for o in self.object_runtime}
-        self._compile()
+        self._compile(prebuilt)
         for i in range(self.model.njnt):
             name = self.model.joint(i).name
             if name in old_q:
                 self.data.qpos[self.model.jnt_qposadr[i]] = old_q[name]
                 self.data.qvel[self.model.jnt_dofadr[i]] = old_dq[name]
-        for obj in self.object_runtime:
-            if obj.name in old_poses:
-                obj.target_position, obj.target_quat = old_poses[obj.name]
+        if keep_object_poses:
+            for obj in self.object_runtime:
+                if obj.name in old_poses:
+                    obj.target_position, obj.target_quat = old_poses[obj.name]
         self._lock_objects()
         self._apply_pose()
         mujoco.mj_forward(self.model, self.data)
         self._cache_flex_rest()
         # The compiled model/data changed; the ghost evaluator must follow it.
         self._ghost_data = mujoco.MjData(self.model)
+        self._placement_data = None
         self._q_tree_target = self._q_tree.copy()
         self._ghost_ready = False
         self._invalidate_ghost()
+
+    # ------------------------------------------------------------------
+    # Palm-mounted object
+    @property
+    def palm_mode(self) -> bool:
+        return str(self.config.get("objects", {}).get("placement", "scene")) == "palm"
+
+    def _palm_cfg(self) -> dict[str, Any]:
+        return dict(self.config.get("objects", {}).get("palm") or {})
+
+    @property
+    def active_object(self) -> str:
+        return self.specs[0].name if self.specs else ""
+
+    def select_object(self, name: str, prebuilt=None, *, refit: bool = True) -> dict[str, Any] | None:
+        """Palm mode: replace the object on the palm with catalog entry ``name``.
+
+        ``prebuilt`` = ``compile_specs([spec])`` done outside the runner lock.
+        """
+        spec = next((s for s in self.catalog if s.name == name), None)
+        if spec is None:
+            raise KeyError(name)
+        if not self.palm_mode or (self.specs and self.specs[0].name == name):
+            return None
+        previous = dict(self._blocked)
+        self.specs = [spec]
+        self._rebuild(keep_object_poses=False, prebuilt=prebuilt)
+        self.place_on_palm()
+        if not refit:
+            return self.refit_request(previous)
+        self.refit_contact_blocks(previous)
+        return None
+
+    def _palm_frame(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """(origin, rotation, forward, palm normal, lateral) of the hand base."""
+        cfg = self._palm_cfg()
+        bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, str(cfg.get("body", "base_link")))
+        if bid < 0:
+            raise RuntimeError("模型缺少手掌基座 body")
+        origin = np.asarray(self.data.xpos[bid], dtype=float).copy()
+        rot = np.asarray(self.data.xmat[bid], dtype=float).reshape(3, 3).copy()
+        forward = rot[:, 0].copy()                                   # towards the fingertips
+        normal = -rot[:, 2] * float(cfg.get("normal_sign", 1.0))     # out of the palm
+        lateral = np.cross(forward, normal)
+        return origin, rot, forward, normal, lateral
+
+    def _placement_tree_poses(self) -> tuple[np.ndarray, np.ndarray]:
+        """Glove tree poses for the open hand and a slightly closed "clear" hand."""
+        if self._palm_tree_poses is None:
+            limits = np.asarray([m.model_rad_limits() for m in self.mapping.motors], dtype=float)
+            open_q = np.clip(np.zeros(12), limits[:, 0], limits[:, 1])
+            frac = float(self._palm_cfg().get("clear_close_fraction", 0.15))
+            clear_q = np.clip(frac * limits[:, 1], limits[:, 0], limits[:, 1])
+            open_tree = self.kinematics.full_pose(open_q, self.model, self.mapping, slot="placement")
+            clear_tree = self.kinematics.full_pose(clear_q, self.model, self.mapping, slot="placement")
+            self._palm_tree_poses = (np.asarray(open_tree, dtype=float).copy(),
+                                     np.asarray(clear_tree, dtype=float).copy())
+        return self._palm_tree_poses
+
+    def _placement_touches(self, obj: ObjectRuntime, centre: np.ndarray, quat: np.ndarray,
+                           tree: np.ndarray) -> bool:
+        """True if the object at ``centre`` touches the glove in pose ``tree``."""
+        if self._placement_data is None:
+            self._placement_data = mujoco.MjData(self.model)
+        aux = self._placement_data
+        aux.qpos[:] = self.model.qpos0
+        aux.qpos[self._tree_qposadr] = tree
+        a = obj.qposadr
+        aux.qpos[a:a + 3] = centre
+        aux.qpos[a + 3:a + 7] = quat
+        mujoco.mj_fwdPosition(self.model, aux)
+        for i in range(aux.ncon):
+            c = aux.contact[i]
+            if (int(c.geom1) in self.glove_geoms) != (int(c.geom2) in self.glove_geoms):
+                return True
+        return False
+
+    @staticmethod
+    def _mat_to_quat(rot: np.ndarray) -> np.ndarray:
+        quat = np.zeros(4)
+        mujoco.mju_mat2Quat(quat, np.ascontiguousarray(rot, dtype=float).reshape(-1))
+        return quat / max(1e-12, float(np.linalg.norm(quat)))
+
+    def palm_position(self, obj: ObjectRuntime) -> tuple[np.ndarray, np.ndarray]:
+        """Seat the object on the palm.
+
+        The object's centre stays over the configured palm point
+        (``anchor_local_m``, base_link frame) for every size: it is only ever
+        moved along the palm normal, away from the palm -- first to rest on
+        the palm surface, then further out until the open hand is clear.  (The
+        old seat kept the front edge at the finger roots, so a bigger object
+        slid towards the wrist.)  ``palm_yaw`` rotates it about the palm normal
+        through its centre.
+        """
+        cfg = self._palm_cfg()
+        spec = obj.spec
+        origin, rot, forward, normal, lateral = self._palm_frame()
+        if spec.shape == "cylinder":
+            # Axis across the palm, like gripping a bar.
+            orient = np.column_stack([forward, normal, lateral])
+        else:
+            orient = np.column_stack([forward, np.cross(normal, forward), normal])
+        yaw = float(self._palm_yaw.get(obj.name, 0.0))
+        if yaw:
+            orient = self._axis_rotation(normal, yaw) @ orient
+        quat = self._mat_to_quat(orient)
+        half = 0.5 * float(spec.size_m)    # extent along the normal (all shapes)
+        anchor = origin + rot @ np.asarray(cfg.get("anchor_local_m", (0.072, -0.005, -0.001)),
+                                           dtype=float)
+        gap = float(cfg.get("gap_m", 0.002))
+        lift_max = float(cfg.get("max_lift_m", 0.05))
+        base = anchor + normal * (half + gap)
+        # Clear of the open hand and of a relaxed, slightly closed hand
+        # (objects.palm.clear_close_fraction), so resting fingers do not
+        # start in contact -- reached only by lifting away from the palm.
+        trees = self._placement_tree_poses()
+        lift = 0.0
+        while lift <= lift_max + 1e-9:
+            centre = base + normal * lift
+            if not any(self._placement_touches(obj, centre, quat, tree) for tree in trees):
+                return centre, quat
+            lift += 0.002
+        return base + normal * lift_max, quat
+
+    @staticmethod
+    def _axis_rotation(axis: np.ndarray, angle: float) -> np.ndarray:
+        a = np.asarray(axis, dtype=float)
+        a = a / max(1e-12, float(np.linalg.norm(a)))
+        k = np.array([[0.0, -a[2], a[1]], [a[2], 0.0, -a[0]], [-a[1], a[0], 0.0]])
+        return np.eye(3) + math.sin(angle) * k + (1.0 - math.cos(angle)) * (k @ k)
+
+    def palm_yaw(self, name: str | None = None) -> float:
+        return float(self._palm_yaw.get(name or self.active_object, 0.0))
+
+    def set_palm_yaw(self, name: str, yaw_rad: float, *, refit: bool = True) -> dict[str, Any] | None:
+        """Rotate the palm object about the palm normal through its centre.
+
+        The fingers holding it meet the rotated surface: blocks are refitted,
+        so the sim hand and (with feedback on) the real glove follow.
+        """
+        obj = next((o for o in self.object_runtime if o.name == name), None)
+        if obj is None or not self.palm_mode:
+            return None
+        yaw = math.remainder(float(yaw_rad), 2.0 * math.pi)
+        if abs(yaw - self._palm_yaw.get(name, 0.0)) < 1e-9:
+            return None
+        previous = dict(self._blocked)
+        self._palm_yaw[name] = yaw
+        mujoco.mj_forward(self.model, self.data)
+        pos, quat = self.palm_position(obj)
+        obj.target_position = pos
+        obj.target_quat = quat
+        obj.spec.position = tuple(float(v) for v in pos)
+        obj.spec.quat = tuple(float(v) for v in quat)
+        self._lock_objects()
+        mujoco.mj_forward(self.model, self.data)
+        if not refit:
+            return self.refit_request(previous)
+        self.refit_contact_blocks(previous)
+        return None
+
+    # ------------------------------------------------------------------
+    # Contact refit after the object changed (size / rotation / kind).
+    #
+    # The search needs ~10-20 closed-chain solves (~4 ms each).  It is split
+    # so that only a snapshot and the final swap need the runner lock:
+    #   req = sim.refit_request(previous)        # lock held, ~1 ms
+    #   res = sim.refit_compute(req)             # NO lock: private solver/MjData
+    #   sim.refit_apply(res)                     # lock held, ~1 ms
+    # While it computes, the previous surfaces stay engaged, so the real
+    # glove keeps its feedback instead of dropping to zero.
+    def _fingers_touching(self, tree: np.ndarray, req: dict[str, Any] | None = None) -> dict[str, str]:
+        """finger -> object it penetrates, with the glove at tree pose ``tree``."""
+        if req is None:
+            if self._placement_data is None:
+                self._placement_data = mujoco.MjData(self.model)
+            model, aux, qpos = self.model, self._placement_data, self.data.qpos
+            tree_adr, glove = self._tree_qposadr, self.glove_geoms
+            by_flex = {fid: o.name for fid, o in self._flex_objects().items()}
+            by_geom = {g: o.name for g, o in self.object_geom_ids.items()}
+        else:
+            model, aux, qpos = req["model"], req["aux"], req["qpos"]
+            tree_adr, glove = req["tree_qposadr"], req["glove_geoms"]
+            by_flex, by_geom = req["by_flex"], req["by_geom"]
+        aux.qpos[:] = qpos
+        aux.qpos[tree_adr] = tree
+        mujoco.mj_fwdPosition(model, aux)
+        out: dict[str, str] = {}
+        for i in range(aux.ncon):
+            c = aux.contact[i]
+            if float(c.dist) >= 0.0:
+                continue
+            g1, g2 = int(c.geom1), int(c.geom2)
+            if g1 in glove:
+                glove_gid, object_gid = g1, g2
+            elif g2 in glove:
+                glove_gid, object_gid = g2, g1
+            else:
+                continue
+            flex_id = int(np.asarray(c.flex).reshape(-1)[1]) if np.ndim(c.flex) else -1
+            name = by_flex.get(flex_id) or by_geom.get(object_gid)
+            if name is not None:
+                out.setdefault(glove[glove_gid], name)
+        return out
+
+    def _flex_objects(self) -> dict[int, ObjectRuntime]:
+        out = {}
+        for obj in self.object_runtime:
+            fid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_FLEX, obj.flex_name)
+            if fid >= 0:
+                out[fid] = obj
+        return out
+
+    def refit_request(self, previous: dict[int, tuple[int, float, float]] | None = None
+                      ) -> dict[str, Any] | None:
+        """Snapshot for refit_compute (call with the runner lock held).
+
+        Re-engages ``previous`` surfaces meanwhile (a rebuild cleared them).
+        """
+        self._surface_goal.clear()
+        if not (self.collision_clamp and self.objects_locked) or not self.object_runtime:
+            self._blocked.clear()
+            self._invalidate_ghost()
+            return None
+        previous = dict(previous if previous is not None else self._blocked)
+        if previous:
+            self._blocked = dict(previous)
+            self._refresh_visual_pose()
+            self._invalidate_ghost(clear_blocks=False)
+        if getattr(self, "_refit_kin", None) is None:
+            self._refit_kin = GloveKinematics(
+                self.kinematics.model_dir, self.mapping,
+                fast=bool(self.config.get("glove", {}).get("fast_kinematics", True)))
+        # Warm-start the private solver from the real-hand pose.
+        src = self.kinematics._slots["target"]
+        self._refit_kin._slots["placement"] = {
+            "targets": dict(src["targets"]), "state": dict(src["state"]),
+            "q": None if src["q"] is None else src["q"].copy()}
+        if getattr(self, "_refit_model", None) is not self.model:
+            self._refit_model = self.model
+            self._refit_aux = mujoco.MjData(self.model)
+        stiffness = {sp.name: self._proxy_stiffness(sp) for sp in self.specs}
+        return {
+            "model": self.model, "aux": self._refit_aux, "qpos": self.data.qpos.copy(),
+            "target": np.asarray(self._motor_target, dtype=float).copy(),
+            "tree_qposadr": self._tree_qposadr.copy(), "glove_geoms": dict(self.glove_geoms),
+            "by_flex": {fid: o.name for fid, o in self._flex_objects().items()},
+            "by_geom": {g: o.name for g, o in self.object_geom_ids.items()},
+            "finger_motors": {f: list(v) for f, v in self._finger_motors.items()},
+            "stiffness": stiffness,
+            "step": float(self.config.get("glove", {}).get("refit_step_fraction", 0.05)),
+        }
+
+    def refit_compute(self, req: dict[str, Any] | None, *, iterations: int = 3) -> dict[str, Any] | None:
+        """The expensive search; touches no live state (no lock needed)."""
+        if req is None:
+            return None
+        kin = self._refit_kin
+        model = req["model"]
+        target = req["target"]
+        motors = req["finger_motors"]
+
+        def pose(q: np.ndarray) -> np.ndarray:
+            return np.asarray(kin.full_pose(q, model, self.mapping, slot="placement"), dtype=float)
+        try:
+            tree = pose(target).copy()
+            # Only fingers can be pushed open; the palm itself is not a motor.
+            touching = {f: o for f, o in self._fingers_touching(tree, req).items() if f in motors}
+            # Walk each touching finger from the real pose towards open in
+            # small steps until it clears, then bisect inside the last step.
+            lo: dict[str, float] = {}
+            hi = {f: 1.0 for f in touching}
+            remaining = set(touching)
+            frac = 1.0
+            while remaining and frac > 0.0:
+                frac = max(0.0, frac - req["step"])
+                q = target.copy()
+                for f in touching:
+                    q[motors[f]] = (frac if f in remaining else lo[f]) * target[motors[f]]
+                hits = self._fingers_touching(pose(q), req)
+                for f in list(remaining):
+                    if f in hits:
+                        hi[f] = frac
+                    else:
+                        lo[f] = frac
+                        remaining.discard(f)
+            # Still touching fully open (palm-fixed finger parts): it cannot be
+            # pushed out of the object, so no spring for this finger.
+            for f in remaining:
+                touching.pop(f, None)
+            for _ in range(iterations if touching else 0):
+                q = target.copy()
+                mid = {f: 0.5 * (lo[f] + hi[f]) for f in touching}
+                for f in touching:
+                    q[motors[f]] = mid[f] * target[motors[f]]
+                hits = self._fingers_touching(pose(q), req)
+                for f in touching:
+                    if f in hits:
+                        hi[f] = mid[f]
+                    else:
+                        lo[f] = mid[f]
+        except KinematicsError:
+            return None
+        goals: dict[int, tuple[int, float, float]] = {}
+        for f, obj_name in touching.items():
+            k = float(req["stiffness"].get(obj_name, 0.0))
+            for idx in motors[f]:
+                tq = float(target[idx])
+                if abs(tq) < 1e-6:
+                    continue
+                goals[idx] = (1 if tq > 0 else -1, lo[f] * tq, k)
+        return {"model": model, "target": target, "tree": tree, "goals": goals}
+
+    def refit_apply(self, res: dict[str, Any] | None) -> bool:
+        """Install the refitted surfaces (runner lock held).  False if stale."""
+        if res is None or res["model"] is not self.model:
+            return False
+        current = self._blocked
+        target = np.asarray(self._motor_target, dtype=float)
+        if np.array_equal(target, res["target"]):
+            self._q_tree_target = np.asarray(res["tree"], dtype=float).copy()
+        blocks: dict[int, tuple[int, float, float]] = {}
+        self._surface_goal.clear()
+        for idx, (sign, goal, k) in res["goals"].items():
+            tq = float(target[idx])
+            old = current.get(idx)
+            start = old[1] if (old is not None and old[0] == sign) else tq
+            # Never start "inside" the real finger (no instant push).
+            if sign * (tq - start) < 0.0:
+                start = tq
+            blocks[idx] = (sign, float(start), float(k))
+            if abs(goal - start) > 1e-9:
+                self._surface_goal[idx] = float(goal)
+        self._blocked = blocks
+        self._surface_goal_t = time.monotonic()
+        self._refresh_visual_pose()
+        self._invalidate_ghost(clear_blocks=False)
+        return True
+
+    def refit_contact_blocks(self, previous: dict[int, tuple[int, float, float]] | None = None,
+                             *, iterations: int = 3) -> None:
+        """Re-derive the contact surfaces after the object changed size/pose/kind.
+
+        For every finger whose real-hand (target) pose penetrates the object,
+        walk from the real pose towards the open pose for the last
+        non-penetrating angle: that is the new surface.  The held surface
+        walks from where it was (``previous``; or the real finger angle for a
+        new contact) to the new one at ``glove.surface_rate_rad_s``, so a
+        growing ball first touches and then gradually pushes the hand open;
+        with feedback on the driver spring pushes the real fingers the same
+        way.  Fingers no longer touching are released.  Synchronous version
+        (tests/headless); the UI uses request/compute/apply around the lock.
+        """
+        self.refit_apply(self.refit_compute(self.refit_request(previous), iterations=iterations))
+
+    def _advance_surfaces(self) -> None:
+        """Walk refitted contact surfaces towards their goal at a bounded rate."""
+        now = time.monotonic()
+        dt = min(0.1, max(0.0, now - self._surface_goal_t))
+        self._surface_goal_t = now
+        if not self._surface_goal:
+            return
+        rate = float(self.config.get("glove", {}).get("surface_rate_rad_s", 1.0))
+        step = rate * dt
+        for idx, goal in list(self._surface_goal.items()):
+            block = self._blocked.get(idx)
+            if block is None:
+                del self._surface_goal[idx]
+                continue
+            sign, frozen, k = block
+            new = frozen + float(np.clip(goal - frozen, -step, step))
+            self._blocked[idx] = (sign, new, k)
+            if abs(goal - new) < 1e-9:
+                del self._surface_goal[idx]
+
+    def place_on_palm(self) -> None:
+        """Seat every scene object on the palm and lock it there."""
+        if self._drag_name is not None:
+            self.end_drag()
+        mujoco.mj_forward(self.model, self.data)
+        for obj in self.object_runtime:
+            pos, quat = self.palm_position(obj)
+            obj.target_position = pos
+            obj.target_quat = quat
+            obj.spec.position = tuple(float(v) for v in pos)
+            obj.spec.quat = tuple(float(v) for v in quat)
+        self.objects_locked = True
+        self._lock_objects()
+        self._invalidate_ghost()
+        mujoco.mj_forward(self.model, self.data)
+        self._cache_flex_rest()

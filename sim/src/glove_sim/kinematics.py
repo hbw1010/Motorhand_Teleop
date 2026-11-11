@@ -76,7 +76,7 @@ class GloveKinematics:
         # derivative is always evaluated on the "target" slot, i.e. at the
         # pose whose contacts produce the feedback.
         self._slots: dict[str, dict] = {}
-        for slot in ("target", "visual"):
+        for slot in ("target", "visual", "placement"):
             self._slots[slot] = self._new_slot()
 
     def _new_slot(self) -> dict:

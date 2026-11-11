@@ -2,17 +2,45 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from .impedance import DriverImpedancePlanner, FrictionCompensator, VelocityEstimator
-from .mapping import GloveMapping
+from .mapping import FINGERS, GloveMapping
 from .objects import ObjectSpec
 from .physics import Simulation, StepResult
 from .sdk.base import GloveBackend, GloveState
+from .recording import SessionRecorder
 from .telemetry import Telemetry
+
+
+@dataclass
+class PlotSample:
+    """Everything the UI curves show, captured once per control tick.
+
+    Torques are all in the model-joint frame (closing = +) so they overlay.
+    """
+
+    t_ns: int
+    finger_force_n: list[float]       # thumb..pinky, palm (simulated contact)
+    torque_driver_nm: np.ndarray      # torque_cmd_nm: what the drivers produce now (predicted)
+    sim_q: np.ndarray                 # visible simulated hand
+    penetration_m: list[float]
+    object_disp_m: float
+    contact_count: int
+    sensor_age_ms: float
+    current_a: np.ndarray             # measured (real) / simulated (fake)
+    sim_dq: np.ndarray                # visible simulated hand velocity (differenced)
+    torque_spring_nm: np.ndarray      # torque_raw_nm: virtual spring, uncapped
+    torque_sent_nm: np.ndarray        # computed at send time, model frame; 0 = nothing sent
+    real_q: np.ndarray                # encoder, NOT clamped to the calibrated range
+    real_dq: np.ndarray               # encoder velocity estimate (used by damping/friction)
+    torque_measured_nm: np.ndarray    # current x Kt, model frame
+    encoder_clamped: np.ndarray       # bool: encoder outside the calibrated range
+    source: str
 
 
 @dataclass
@@ -45,6 +73,19 @@ class Runner:
         self.sent_torque_nm = np.zeros(12)
         # Real-finger joint velocity (model frame) for damping/friction.
         self.velocity = VelocityEstimator(float(config["glove"].get("velocity_filter_hz", 12.0)))
+        # The glove is kinematic (MuJoCo qvel is zeroed every step), so the
+        # visible sim-hand velocity is differenced from its pose per tick.
+        self.sim_velocity = VelocityEstimator(float(config["glove"].get("velocity_filter_hz", 12.0)))
+        self._last_sim_t_ns: int | None = None
+        # Per-tick samples for the UI curves (drained by the UI thread).
+        self.plot_samples: deque[PlotSample] = deque(maxlen=4000)
+        # Full per-tick session recording (curves + scene state + real glove),
+        # for offline review: python -m glove_sim.cli review.
+        self.recorder: SessionRecorder | None = None
+        self.torque_constant = float(config["glove"].get("torque_constant_nm_per_a", 5.1))
+        self._torque_axis = np.asarray(
+            [m.sign * m.scale for m in mapping.motors], dtype=float) * np.asarray(
+            config["glove"].get("torque_sign", [1.0] * 12), dtype=float)
         self._last_read_t: float | None = None
         self.last_impedance: list | None = None
         self.impedance_planner = DriverImpedancePlanner(config["glove"].get("driver_impedance", {}),
@@ -270,16 +311,71 @@ class Runner:
                     self._emergency_stop_locked()
                     sent[:] = 0.0
                     break
-        # Exactly what was queued to the glove this tick (motor-axis Nm for
-        # the real glove; zero when feedback is off or a motor is skipped).
+        # Exactly what was queued to the glove this tick (motor-axis Nm;
+        # zero when feedback is off or a motor is skipped).
         self.sent_torque_nm = sent
         if result is not None:
+            self._update_sim_velocity(result)
+            sample = self._plot_sample(result, sent)
+            self.plot_samples.append(sample)
+            if self.recorder is not None:
+                self.recorder.record(self, result, sample)
             hz = self.stats.loop_hz or float(self.config["simulation"].get("control_hz", 200.0))
             row = self.telemetry.make_row(result, self.state, loop_hz=hz, notes=self.notes)
             self.telemetry.ring.push(row)
             if self.telemetry.recording:
                 self.telemetry.write(row)
         return result
+
+    def _update_sim_velocity(self, result: StepResult) -> None:
+        t = int(result.timestamp_ns)
+        dt = 0.0 if self._last_sim_t_ns is None else (t - self._last_sim_t_ns) / 1e9
+        self._last_sim_t_ns = t
+        result.sim_dq = self.sim_velocity.update(result.sim_q, dt).copy()
+
+    def to_model_torque(self, motor_axis_nm: np.ndarray) -> np.ndarray:
+        """Motor-axis torque -> model-joint torque (inverse of RealGlove.motor_axis_torque)."""
+        axis = np.where(self._torque_axis == 0.0, 1.0, self._torque_axis)
+        return np.asarray(motor_axis_nm, dtype=float) / axis
+
+    def _plot_sample(self, result: StepResult, sent_motor_nm: np.ndarray) -> PlotSample:
+        state = self.state
+        nan12 = np.full(12, np.nan)
+        if state is not None:
+            current = np.asarray([float(state.current_a.get(i + 1, np.nan)) for i in range(12)])
+            real_q = np.asarray(state.angles_rad, dtype=float).copy()
+            clamped = np.zeros(12, dtype=bool)
+            for i, motor in enumerate(self.mapping.motors):
+                raw = (state.raw_deg or {}).get(motor.motor_id)
+                if raw is None or not np.isfinite(raw):
+                    continue
+                q = motor.raw_to_model_rad(raw)
+                lo, hi = motor.model_rad_limits()
+                real_q[i] = q
+                clamped[i] = q < lo - 1e-9 or q > hi + 1e-9
+            age = max(0.0, (result.timestamp_ns - state.timestamp_ns) / 1e6)
+            source = state.source
+        else:
+            current, real_q, clamped, age, source = nan12, nan12, np.zeros(12, bool), float("nan"), ""
+        return PlotSample(
+            t_ns=int(result.timestamp_ns),
+            finger_force_n=[float(result.finger_force_n.get(f, 0.0)) for f in FINGERS + ("palm",)],
+            torque_driver_nm=np.asarray(result.torque_cmd_nm, dtype=float).copy(),
+            sim_q=np.asarray(result.sim_q, dtype=float).copy(),
+            penetration_m=[float(result.finger_penetration_m.get(f, 0.0)) for f in FINGERS],
+            object_disp_m=float(result.max_object_disp_m),
+            contact_count=int(result.contact_count),
+            sensor_age_ms=age,
+            current_a=current,
+            sim_dq=np.asarray(result.sim_dq, dtype=float).copy(),
+            torque_spring_nm=np.asarray(result.torque_raw_nm, dtype=float).copy(),
+            torque_sent_nm=self.to_model_torque(sent_motor_nm),
+            real_q=real_q,
+            real_dq=self.velocity.dq.copy(),
+            torque_measured_nm=self.to_model_torque(current * self.torque_constant),
+            encoder_clamped=clamped,
+            source=source,
+        )
 
     def _plan_impedance(self, dq: np.ndarray) -> list:
         """MIT kp/kd/target/feed-forward per motor (model frame).
@@ -343,10 +439,29 @@ class Runner:
                 self.glove.close()
             except Exception:
                 pass
-            self.telemetry.stop()
+            self.stop_recording()
 
     def start_recording(self, directory: str) -> str:
-        return str(self.telemetry.start(directory))
+        """Start the CSV/JSONL telemetry and the full session recording.
 
-    def stop_recording(self) -> None:
-        self.telemetry.stop()
+        Returns the session directory (see glove_sim.recording).
+        """
+        with self.lock:
+            self.telemetry.start(directory)
+            if self.recorder is None or not self.recorder.active:
+                self.recorder = SessionRecorder(directory)
+                self.recorder.start(self)
+            return str(self.recorder.path)
+
+    def stop_recording(self) -> str | None:
+        with self.lock:
+            self.telemetry.stop()
+            recorder, self.recorder = self.recorder, None
+        path = recorder.stop() if recorder is not None else None
+        return None if path is None else str(path)
+
+    def record_event(self, kind: str, **data) -> None:
+        """Note a user action (object change, slider, ...) in the session recording."""
+        recorder = self.recorder
+        if recorder is not None:
+            recorder.event(kind, **data)

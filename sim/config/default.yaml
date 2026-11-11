@@ -18,21 +18,26 @@ simulation:
   # physics then runs slower than real time instead of stalling the control
   # loop.  null = old behaviour (catch up with wall time, max 30 steps).
   physics_budget_ms: 4.0
-  ui_hz: 60.0
+  ui_hz: 120.0             # UI frame cap; >100 is pointless (sim state changes at control_hz)
+  # false: do not wait for the 60 Hz monitor refresh; frames shown are fresher
+  # (lower latency) at the cost of possible tearing.
+  ui_vsync: false
   gravity: [0.0, 0.0, 0.0]
   # How long a simulated command remains valid.
   command_ttl_s: 0.10
 
 # Display frame of the CAD glove.  The raw MJCF has the right hand palm-down
-# at z=0; lift it and turn the palm up so the virtual objects sit above the
-# palm instead of appearing to float behind a hand that faces the floor.
+# at z=0 with the fingers along +x.  Stand it upright: fingers up (+z), palm
+# facing -y (towards the default camera), wrist just above the floor.  The
+# palm object is seated in the base_link frame, so it follows any pose here.
+# (Previous lying, palm-up pose: position [0, 0, 0.085], quat [0, 1, 0, 0].)
 scene:
-  hand_position: [0.0, 0.0, 0.085]
-  hand_quat_wxyz: [0.0, 1.0, 0.0, 0.0]   # 180 deg about x: palm up
-  camera_lookat: [0.145, 0.005, 0.120]
-  camera_distance: 0.46
-  camera_azimuth: 122.0
-  camera_elevation: -24.0
+  hand_position: [0.0, 0.0, 0.075]
+  hand_quat_wxyz: [0.5, -0.5, -0.5, -0.5]   # base x->world z, base -z->world -y
+  camera_lookat: [0.010, -0.015, 0.135]
+  camera_distance: 0.40
+  camera_azimuth: 110.0
+  camera_elevation: -12.0
 
 glove:
   side: right
@@ -58,7 +63,10 @@ glove:
     - pinky_pip
   kp_nm_rad: 3.0
   kd_nm_s_rad: 0.8
-  torque_limit_nm: [4.0, 2.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0]
+  # J1 (thumb CMC flexion) sits at the thumb root with the longest lever to
+  # the contact, so it needs more torque than the others (user request
+  # 2026-11-10): 4.0 -> 6.0 Nm.  Nominal SDK Nm, not a calibrated output.
+  torque_limit_nm: [6.0, 2.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0]
   slew_nm_s: 60.0
   # Feedback model.
   #   proxy_spring (default): joint-space virtual spring.  When the real
@@ -85,7 +93,11 @@ glove:
     # oscillated 1.5-5 deg p-p at 0-0.004, settled with 0 p-p at 0.008.
     damping_s: 0.008
     damping_max: 0.5
-    k_max_nm_per_rad: 80.0
+    # Per-motor contact-stiffness multiplier (UI slider "J1 拇指根力度 ×").
+    joint_gain: [1.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    # kp ceiling per motor; J1 gets more room for its larger multiplier.
+    # (J4 was verified stable up to kp 80; J1 above 80 is not yet verified.)
+    k_max_nm_per_rad: [100.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0]
     release_lookahead_s: 0.02 # moving out: aim the spring this far ahead; 0.04 rang (velocity lag)
     rebound_mode: soften      # soften (smooth, no pull-back) | release (legacy hard kp=0; chattered at contact)
     damping_off_velocity_rad_s: 0.15  # damping stays on in contact until a clear withdrawal (> ~9 deg/s)
@@ -120,6 +132,10 @@ glove:
   # what you see is what touches); spheres = legacy 17 hand-placed proxies
   # (they sat on the dorsal housings and missed the palm-side finger rings).
   collision_geometry: mesh
+  # After the object grows / rotates / changes, the held contact surface walks
+  # to its new place at this rate, so the hand (sim and, with feedback on,
+  # the real glove) is pushed open gradually rather than kicked.
+  surface_rate_rad_s: 1.0
   release_margin_rad: 0.01    # contact is released only ~0.6 deg outside the surface (hysteresis)
   stale_release_clearance_m: 0.01  # unlock a held finger once no object is within ~1 cm of it
   clamp_soft_allow_m: 0.0     # 0 = no visible penetration; unlock to squeeze the flex ball
@@ -127,10 +143,32 @@ glove:
   # torque increases the raw encoder angle on all 12 motors (+1).  The MIT
   # position frame equals the reported angle on all 12 motors.
   torque_sign: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+  # Measured 2026-11-10 (glove not worn): ~0.2 A per Nm, same sign as the
+  # MIT torque.  Used only to display current x Kt as a measured-torque estimate.
+  torque_constant_nm_per_a: 5.1
   release_torque_nm: 0.0
 
 objects:
   rebuild_hz: 10.0
+  # palm  : one object at a time (UI dropdown), seated on the palm just
+  #         behind the finger roots and locked there -- close the hand to
+  #         grasp it, no need to move the hand or drag objects.
+  # scene : legacy layout, every object scattered in the scene, draggable.
+  placement: palm
+  palm:
+    default_object: ball_soft
+    body: base_link
+    # Object centre over the palm, base_link frame: x along the fingers,
+    # y across the palm, z = palm surface (base z points out of the back of
+    # the hand).  Resizing/rotating keeps the centre over this point; the
+    # object only moves along the palm normal, away from the palm.
+    anchor_local_m: [0.072, -0.005, -0.001]   # all sizes 25-90 mm graspable, relaxed hand clear
+    gap_m: 0.002              # clearance above the palm
+    # Must not touch the hand when every motor is at this fraction of its
+    # closing range, so a relaxed hand does not start in contact.
+    clear_close_fraction: 0.15   # "slightly closed" reference pose (tests); not used for seating
+    max_lift_m: 0.05
+    size_range_m: [0.020, 0.090]
   # Keep every object at its target pose unless the user unchecks "锁定物体"
   # in the UI.  Unlocking lets the glove push/grasp objects (they can drift).
   locked_default: true
@@ -145,38 +183,44 @@ objects:
     # without initial contact.  The other objects are laid out in a reachable
     # arc; drag any of them into the hand.  Only the ball is a flex lattice.
     - name: ball_soft
+      label: 软球（柔性）
       shape: sphere
-      size_m: 0.030
+      size_m: 0.045
       stiffness: 0.25       # 0 very soft .. 1 rigid
       deformable: true
       position: [0.140, 0.000, 0.163]
     - name: ball_hard
+      label: 硬球
       shape: sphere
-      size_m: 0.030
+      size_m: 0.045
       stiffness: 0.92
       deformable: false
       position: [0.195, 0.090, 0.120]
     - name: box_soft
+      label: 软方块
       shape: box
-      size_m: 0.030
+      size_m: 0.045
       stiffness: 0.25
       deformable: false  # compliant contact; only the ball uses a flex lattice
       position: [0.210, 0.000, 0.115]
     - name: box_hard
+      label: 硬方块
       shape: box
-      size_m: 0.030
+      size_m: 0.045
       stiffness: 0.92
       deformable: false
       position: [0.210, -0.090, 0.115]
     - name: cylinder_soft
+      label: 软圆柱
       shape: cylinder
-      size_m: 0.030
+      size_m: 0.045
       stiffness: 0.25
       deformable: false  # compliant contact; only the ball uses a flex lattice
       position: [0.285, 0.070, 0.115]
     - name: cylinder_hard
+      label: 硬圆柱
       shape: cylinder
-      size_m: 0.030
+      size_m: 0.045
       stiffness: 0.92
       deformable: false
       position: [0.285, -0.060, 0.115]

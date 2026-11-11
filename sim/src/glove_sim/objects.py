@@ -16,6 +16,11 @@ class ObjectSpec:
     position: tuple[float, float, float]
     deformable: bool = True
     quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
+    label: str = ""
+
+    @property
+    def display_name(self) -> str:
+        return self.label or self.name
 
     @classmethod
     def from_dict(cls, data: dict) -> "ObjectSpec":
@@ -29,6 +34,7 @@ class ObjectSpec:
             position=pos,
             deformable=bool(data.get("deformable", True)),
             quat=quat,
+            label=str(data.get("label", "")),
         )
 
 

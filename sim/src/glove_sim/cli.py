@@ -195,6 +195,39 @@ def cmd_replay(args) -> int:
     return 0
 
 
+def _session_path(args) -> Path | None:
+    from .recording import latest_session
+    if args.session:
+        return Path(args.session)
+    config = load_config(getattr(args, "config", None))
+    directory = Path(config.get("telemetry", {}).get("default_dir", "data"))
+    if not directory.is_absolute():
+        directory = Path(config["_sim_root"]) / directory
+    return latest_session(directory)
+
+
+def cmd_review(args) -> int:
+    """Interactive review of a recorded session (curves + scene at a time cursor)."""
+    path = _session_path(args)
+    if path is None:
+        print("REVIEW_FAIL: 没有找到记录（在仿真界面点“开始记录”，或用 --record）")
+        return 2
+    from .ui.review import run_review
+    return run_review(path)
+
+
+def cmd_export_session(args) -> int:
+    from .recording import load_session
+    path = _session_path(args)
+    if path is None:
+        print("EXPORT_FAIL: 没有找到记录")
+        return 2
+    session = load_session(path)
+    out = session.to_csv(args.out)
+    print(f"EXPORT_OK {len(session)} 帧 -> {out}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Motorhand glove force-feedback simulation")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -231,6 +264,17 @@ def build_parser() -> argparse.ArgumentParser:
     home.add_argument("--speed-rpm", type=float, default=5.0)
     home.add_argument("--timeout-s", type=float, default=30.0)
     home.set_defaults(func=cmd_home_glove)
+
+    review = sub.add_parser("review", help="回放分析记录（曲线 + 当时的仿真/真手状态）")
+    review.add_argument("session", nargs="?", default=None, help="记录目录；默认最新一次")
+    review.add_argument("--config", type=Path, default=None)
+    review.set_defaults(func=cmd_review)
+
+    export = sub.add_parser("export-session", help="把记录导出为 CSV")
+    export.add_argument("session", nargs="?", default=None, help="记录目录；默认最新一次")
+    export.add_argument("--out", type=Path, default=None)
+    export.add_argument("--config", type=Path, default=None)
+    export.set_defaults(func=cmd_export_session)
 
     rec = sub.add_parser("record", help="仿真并记录")
     _common(rec)
