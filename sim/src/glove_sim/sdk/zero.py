@@ -69,11 +69,11 @@ def write_zero(mapping_path: Path, values: dict[int, float], finger_keys: tuple[
 
 
 def zero_online_glove(mapping_path: Path, *, finger: str | None, all_motors: bool,
-                      backup_dir: Path, assume_yes: bool = False) -> int:
+                      backup_dir: Path, assume_yes: bool = False, glove_kwargs: dict | None = None) -> int:
     from .real import RealGlove, RealGloveError
 
     mapping = GloveMapping.load(mapping_path)
-    glove = RealGlove(mapping)
+    glove = RealGlove(mapping, **(glove_kwargs or {}))
     try:
         state = glove.open()
         online = state.online_ids

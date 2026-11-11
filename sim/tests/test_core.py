@@ -979,3 +979,92 @@ def test_palm_object_rotates_about_palm_normal():
     assert abs(abs(float(axis @ normal)) - 1.0) < 1e-6
     sim.reset_object_poses()
     assert sim.palm_yaw() == 0.0
+
+
+# ---------------------------------------------------------------- 驱动 2
+def _fake_g4_gateway(master_fd, stop, log, angles):
+    """Minimal LQS-GW02 stand-in on a pty: answers E0 01 / MIT / servo frames."""
+    import binascii, os, select, struct
+    fmt = struct.Struct("<2sBBHBBHHI8sIHH")
+    buf = bytearray()
+    t0 = time.monotonic()
+
+    def reply(bus, cid, data):
+        body = fmt.pack(b"\xA5\x5A", 1, 0x90, 0, bus, len(data), cid, 0,
+                        int((time.monotonic() - t0) * 1e6) & 0xFFFFFFFF, data.ljust(8, b"\0"), 0, 0, 0)[:30]
+        os.write(master_fd, body + struct.pack("<H", binascii.crc_hqx(body, 0xFFFF)))
+
+    while not stop.is_set():
+        if not select.select([master_fd], [], [], 0.01)[0]:
+            continue
+        try:
+            buf += os.read(master_fd, 4096)
+        except OSError:
+            return
+        while len(buf) >= 32:
+            if buf[:3] != b"\xA5\x5A\x01":
+                del buf[0]
+                continue
+            frame = bytes(buf[:32]); del buf[:32]
+            _, _, kind, _, bus, length, cid, _, _, data, _, _, crc = fmt.unpack(frame)
+            assert binascii.crc_hqx(frame[:30], 0xFFFF) == crc
+            if kind != 2:
+                continue
+            data = data[:length]
+            log.append((bus, cid, data))
+            angle = angles.get(cid, 0.0)
+            if data[:2] == b"\xE0\x01":
+                reply(bus, cid, bytes([5 << 5, 1]) + struct.pack(">f", angle))
+            elif length == 8 and data[0] >> 5 == 0:      # MIT -> type-1 reply
+                pos = round((math.radians(angle) + 5) / 10 * 65535)
+                reply(bus, cid, bytes([1 << 5, pos >> 8, pos & 255, 0, 0x08, 0x00, 90, 0]))
+            elif length == 8:                             # servo -> type-2 reply
+                reply(bus, cid, bytes([2 << 5]) + struct.pack(">f", angle) + b"\x00\x0a" + bytes([90]))
+
+
+def test_driver2_gateway_sdk_reads_commands_and_releases_on_deadline():
+    import os, pty, shutil, threading
+    if shutil.which(os.environ.get("CXX", "g++")) is None:
+        pytest.skip("需要 g++ 编译驱动 2")
+    from glove_sim.sdk.driver2 import GatewayHand
+    from glove_sim.sdk.real import RealGlove
+
+    master, slave = pty.openpty()
+    port = os.ttyname(slave)
+    angles = {mid: 10.0 * mid - 40.0 for mid in range(1, 13)}
+    log: list = []
+    stop = threading.Event()
+    thread = threading.Thread(target=_fake_g4_gateway, args=(master, stop, log, angles), daemon=True)
+    thread.start()
+    mapping = GloveMapping.load(load_config()["paths"]["glove_mapping"])
+    glove = RealGlove(mapping, driver=2, driver2={"port": port})
+    try:
+        state = glove.open()
+        assert isinstance(glove._hand, GatewayHand)
+        assert state.online_ids == tuple(range(1, 13))
+        for mid in range(1, 13):
+            assert state.raw_deg[mid] == pytest.approx(angles[mid], abs=1e-4)
+        # Vendor wiring: CAN1 ID9-12, CAN2 ID5-8, CAN3 ID1-4.
+        routes = glove._hand.routes()
+        assert routes[1] == (3, 1) and routes[5] == (2, 5) and routes[12] == (1, 12)
+
+        glove.enable(True)
+        deadline = time.monotonic_ns() + int(0.15e9)
+        glove._hand.set_mit(3, angles[3] + 5.0, kp=2.0, kd=0.1, torque_nm=0.5, deadline_ns=deadline)
+        time.sleep(0.08)
+        mit = [d for b, c, d in log if c == 3 and len(d) == 8 and d[0] >> 5 == 0]
+        word = int.from_bytes(mit[-1], "big")
+        assert round((word >> 49 & 0xFFF) / 4095 * 500, 1) == pytest.approx(2.0, abs=0.2)
+        assert ((word >> 24 & 0xFFFF) / 65535 * 10 - 5) == pytest.approx(math.radians(angles[3] + 5), abs=1e-3)
+        # Deadline passes without a refresh -> zero-gain MIT, then back to query.
+        time.sleep(0.25)
+        tail = [d for b, c, d in log[-40:] if c == 3]
+        assert all(d[:2] == b"\xE0\x01" for d in tail[-3:])
+        released = [d for b, c, d in log if c == 3 and len(d) == 8 and int.from_bytes(d, "big") >> 49 == 0]
+        assert released, "deadline must send zero-gain MIT"
+        assert glove.read().online_ids == tuple(range(1, 13))
+    finally:
+        glove.close()
+        stop.set()
+        thread.join(1)
+        os.close(master); os.close(slave)

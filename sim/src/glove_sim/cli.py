@@ -26,6 +26,18 @@ def _common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--duration", type=float, default=0.0, help="秒；0=一直运行")
     parser.add_argument("--record", type=Path, default=None, help="自动记录目录")
+    _driver_arg(parser)
+
+
+def _driver_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--driver", type=int, choices=(1, 2), default=None,
+                        help="真机驱动：1=3×CANable2(encos_hand)，2=STM32G4 网关(C++ SDK)；默认取 glove.driver")
+
+
+def _glove_kwargs(config: dict, args) -> dict:
+    glove_cfg = config["glove"]
+    driver = getattr(args, "driver", None) or int(glove_cfg.get("driver", 2))
+    return {"driver": int(driver), "driver2": dict(glove_cfg.get("driver2") or {})}
 
 
 def _mapping(config: dict, override: Path | None) -> GloveMapping:
@@ -36,7 +48,8 @@ def _make_runner(args, *, real: bool) -> Runner:
     config = load_config(args.config)
     mapping = _mapping(config, args.mapping)
     specs = [ObjectSpec.from_dict(item) for item in config["objects"]["defaults"]]
-    glove = (RealGlove(mapping, torque_sign=config["glove"].get("torque_sign"))
+    glove = (RealGlove(mapping, torque_sign=config["glove"].get("torque_sign"),
+                       **_glove_kwargs(config, args))
              if real else FakeGlove(mapping))
     telemetry = Telemetry(config, source="real" if real else "fake")
     runner = Runner(config, mapping, glove, specs, telemetry=telemetry, feedback=bool(args.feedback))
@@ -102,15 +115,30 @@ def cmd_teleop(args) -> int:
 def cmd_check_glove(args) -> int:
     config = load_config(args.config)
     mapping = _mapping(config, args.mapping)
-    print("CANable2 端口:")
-    ports = discover_ports()
-    print(ports if ports else "  (未发现 16d0:117e 设备)")
-    if not ports:
-        print("设备检查失败：插好三个 CANable2、安装 udev 规则并把用户加入 plugdev。")
-        return 1
-    glove = RealGlove(mapping)
+    kwargs = _glove_kwargs(config, args)
+    driver = kwargs["driver"]
+    port_override = kwargs["driver2"].get("port") if driver == 2 else None
+    if driver == 2:
+        print("驱动 2（STM32G4 网关）串口:")
+        ports = [port_override] if port_override and port_override != "auto" else discover_ports(2)
+        print(ports if ports else "  (未发现网关 USB 串口)")
+        if not ports:
+            print("设备检查失败：插好网关 Type-C 线；旧方案用 --driver 1。")
+            return 1
+    else:
+        print("驱动 1（CANable2）端口:")
+        ports = discover_ports(1)
+        print(ports if ports else "  (未发现 16d0:117e 设备)")
+        if not ports:
+            print("设备检查失败：插好三个 CANable2、安装 udev 规则并把用户加入 plugdev；新网关用 --driver 2。")
+            return 1
+    glove = RealGlove(mapping, **kwargs)
     try:
         state = glove.open()
+        print(f"driver={glove.driver_name}")
+        if driver == 2:
+            diag = glove._hand.diagnostics()["joints"]
+            print("  " + "  ".join(f"ID{mid}@CAN{d['bus']}" for mid, d in sorted(diag.items())))
         print(f"online_ids={state.online_ids}")
         print(f"source={state.source} timestamp_ns={state.timestamp_ns}")
         print("motor  raw_deg  current_a  temp_c  error")
@@ -133,7 +161,8 @@ def cmd_zero_glove(args) -> int:
     from .sdk.zero import zero_online_glove
     try:
         return zero_online_glove(mapping_path, finger=args.finger, all_motors=args.all,
-                                 backup_dir=backup, assume_yes=args.yes)
+                                 backup_dir=backup, assume_yes=args.yes,
+                                 glove_kwargs=_glove_kwargs(config, args))
     except Exception as error:
         print(f"ZERO_FAIL: {error}")
         return 2
@@ -142,6 +171,10 @@ def cmd_zero_glove(args) -> int:
 def cmd_home_glove(args) -> int:
     config = load_config(args.config)
     mapping_path = args.mapping or Path(config["paths"]["glove_mapping"])
+    if _glove_kwargs(config, args)["driver"] != 1:
+        print("HOME_FAIL: home-glove 调用的是驱动 1 的 encos_home.py，驱动 2 暂不支持自动回零；"
+              "如需用旧适配器回零请加 --driver 1")
+        return 2
     script = SIM_ROOT.parent / "src" / "motorhand_teleop" / "encos_home.py"
     if not script.is_file():
         print(f"HOME_FAIL: 缺少 {script}")
@@ -246,6 +279,7 @@ def build_parser() -> argparse.ArgumentParser:
     check = sub.add_parser("check-glove", help="只读设备检查")
     check.add_argument("--config", type=Path, default=None)
     check.add_argument("--mapping", type=Path, default=None)
+    _driver_arg(check)
     check.set_defaults(func=cmd_check_glove)
 
     zero = sub.add_parser("zero-glove", help="软件零位标定（不发送位置/MIT）")
@@ -255,6 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
     zero.add_argument("--finger", choices=("thumb", "index", "middle", "ring", "pinky"), default=None)
     zero.add_argument("--all", action="store_true", help="一次采集 12 轴当前反馈")
     zero.add_argument("--yes", action="store_true", help="兼容非交互脚本")
+    _driver_arg(zero)
     zero.set_defaults(func=cmd_zero_glove)
 
     home = sub.add_parser("home-glove", help="统一使能并回零（危险动作，需确认）")
@@ -263,6 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
     home.add_argument("--tolerance-rad", type=float, default=0.15)
     home.add_argument("--speed-rpm", type=float, default=5.0)
     home.add_argument("--timeout-s", type=float, default=30.0)
+    _driver_arg(home)
     home.set_defaults(func=cmd_home_glove)
 
     review = sub.add_parser("review", help="回放分析记录（曲线 + 当时的仿真/真手状态）")

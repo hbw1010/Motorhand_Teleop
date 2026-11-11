@@ -13,11 +13,14 @@
 | 路径 | 内容 |
 |---|---|
 | `src/glove_sim/` | 仿真、运动学、物体、SDK、遥测、UI |
-| `src/glove_sim/sdk/real.py` | Encos 12 轴真实手套封装，只读检查/使能/力矩前馈 |
+| `src/glove_sim/sdk/real.py` | Encos 12 轴真实手套封装，只读检查/使能/力矩前馈；按 `--driver` 选驱动 1/2 |
+| `src/glove_sim/sdk/driver2.py` | 驱动 2：厂商 G4 网关 C++ SDK 的 ctypes 绑定（接口与驱动 1 的 `EncosHand` 一致） |
 | `src/glove_sim/sdk/zero.py` | 软件零位写入（保留相对限位） |
 | `config/default.yaml` | 仿真、物体、反馈、遥测配置 |
 | `../assets/hand_motor_ve33/hand_motor_ve33_R/` | 手套本体 MJCF、STL、闭环求解脚本 |
-| `../hardware/encos_dexhand/` | Encos SDK 与 `glove_mapping.json` / `joint_calibration.json` |
+| `../hardware/encos_dexhand/` | 驱动 1：Encos SDK（CANable2）与 `glove_mapping.json` / `joint_calibration.json` |
+| `../hardware/encos_g4_gateway_sdk/vendor/` | 驱动 2：厂商 STM32G4 网关 Linux C++ SDK 原样（不修改） |
+| `../hardware/encos_g4_gateway_sdk/shim/g4_shim.cpp` | 驱动 2：SDK 之上的 C 接口 + 指令超时卸力 + 接收时间戳 |
 | `../src/motorhand_teleop/encos_home.py` | 原仓库统一使能回零工具（`home-glove` 调用） |
 | `../tianji_teleop/udev/90-motorhand-glove.rules` | CANable2 普通用户访问规则 |
 | `../config/feedback/` | 原仓库反馈限幅配置（当前仿真采用 `config/default.yaml` 内参数） |
@@ -47,6 +50,27 @@ uv pip install --python .pixi/envs/default/bin/python \
 
 ## 3. 真机设备检查
 
+### 3.0 选择驱动
+
+| 驱动 | 硬件 | 选择方式 |
+|---|---|---|
+| 1 | 3 个 CANable2，每路 CAN 一个 USB，`encos_hand`（Python） | `--driver 1` |
+| 2（默认） | STM32G4 LQS-GW02 网关，单个 Type-C 串口（CH340，`/dev/ttyUSB0`），921600 波特率，板端调度 3 路 CAN；厂商 C++ SDK | `--driver 2` 或 `config/default.yaml` 的 `glove.driver` |
+
+`check-glove`、`teleop`、`sim --real`、`record --real`、`zero-glove` 都接受 `--driver`。上层（运行器、阻抗、标零、记录）对两种驱动完全相同；零位文件共用。
+
+驱动 2 说明：
+
+- 厂商 SDK 是纯头文件 C++（`lqs::HandClientG4`），`vendor/` 下原样保存、不改。Python 通过 `shim/g4_shim.cpp` 编译出的 `build/libg4_shim.so` 调用，首次使用时自动 `g++ -std=c++17` 编译（源文件更新会自动重编）。
+- SDK 自己的 200 Hz IO 线程在 C++ 里跑，不受 Python GIL / MuJoCo / UI 影响。接线按 SDK 固定：CAN1=ID9–12，CAN2=ID5–8，CAN3=ID1–4。
+- 未使能时 SDK 每周期对每台电机发 `E0 01` 只读查询；MIT 目标角用度（SDK 内部转弧度）。
+- shim 只在 SDK 之上加了两件事：① 指令超时（`command_ttl_s`）后自动发零增益 MIT 再回到只读查询，避免 SDK 无限重发旧 MIT 目标；② 每台电机的主机接收时间戳（SDK 快照里的 `age_ms`/`online` 以周期开始时刻计算，不能当绝对时间用）。
+- 退出时 SDK `Disconnect()` 自动发 3 轮零增益零力矩 MIT 卸力报文。
+- 串口权限：用户需在 `dialout` 组（或 `sudo chmod 666 /dev/ttyUSB0`）。
+- `home-glove` 仍只支持驱动 1。
+
+### 3.1 驱动 1（CANable2）
+
 1. 接 3 个 CANable2（USB `16d0:117e`，slcan，1 Mbps）；同一时间只允许一个程序占用串口。
 2. 安装 udev 规则（只做一次）：
 
@@ -66,7 +90,7 @@ cd /home/fcl/hbw/Motorhand_Teleop/sim
 pixi run check-glove
 ```
 
-`check-glove` 打开串口、扫描、读取角度/电流/温度/报警，**不使能、不发送位置或 MIT**。只有 12 个电机全部在线且无报警才返回 `CHECK_OK`。
+`check-glove` 打开串口、扫描、读取角度/电流/温度/报警，**不使能、不发送位置或 MIT**（驱动 2 关闭时会按 SDK 行为发零增益卸力报文，不产生运动）。只有 12 个电机全部在线且无报警才返回 `CHECK_OK`。
 
 ## 4. 置零 / 标零 / 回零（危险动作分开）
 

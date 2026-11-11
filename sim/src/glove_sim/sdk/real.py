@@ -15,8 +15,14 @@ class RealGloveError(RuntimeError):
     pass
 
 
-def discover_ports() -> list[str]:
-    """CANable2 ports only (VID/PID 16d0:117e)."""
+def discover_ports(driver: int = 1) -> list[str]:
+    """驱动 1: CANable2 ports (16d0:117e).  驱动 2: G4 gateway USB-serial ports."""
+    if int(driver) == 2:
+        from .driver2 import Driver2Error, discover_gateway_ports
+        try:
+            return discover_gateway_ports()
+        except Driver2Error as exc:  # pragma: no cover
+            raise RealGloveError(str(exc)) from exc
     try:
         import serial.tools.list_ports as lp
     except ImportError as exc:  # pragma: no cover - dependency error path
@@ -25,8 +31,11 @@ def discover_ports() -> list[str]:
             if (getattr(info, "vid", None), getattr(info, "pid", None)) == (0x16D0, 0x117E)]
 
 
+DRIVER_NAMES = {1: "驱动 1（3×CANable2 + encos_hand）", 2: "驱动 2（STM32G4 LQS-GW02 网关 C++ SDK）"}
+
+
 class RealGlove:
-    """Thin wrapper around the extracted ``encos_hand`` SDK.
+    """Real glove over 驱动 1 (``encos_hand``, 3x CANable2) or 驱动 2 (G4 gateway).
 
     The wrapper is intentionally conservative: it refuses to enable output
     unless all 12 motors are online, the calibration file is valid, and no
@@ -36,8 +45,13 @@ class RealGlove:
     """
 
     def __init__(self, mapping: GloveMapping, *, ports: Mapping[int, str] | None = None,
-                 torque_sign: tuple[float, ...] | None = None) -> None:
+                 torque_sign: tuple[float, ...] | None = None, driver: int = 2,
+                 driver2: Mapping | None = None) -> None:
         self.mapping = mapping
+        self.driver = int(driver)
+        if self.driver not in DRIVER_NAMES:
+            raise RealGloveError(f"未知驱动 {driver}（可选 1 / 2）")
+        self.driver2 = dict(driver2 or {})
         self.ports = dict(ports) if ports else None
         self.torque_sign = np.asarray(torque_sign if torque_sign is not None else [1.0] * 12, dtype=np.float64)
         self._hand = None
@@ -54,34 +68,68 @@ class RealGlove:
         return self._hand is not None and bool(self._hand.get_online_ids())
 
     def open(self) -> GloveState:
-        try:
-            from encos_hand import EncosHand
-        except ImportError as exc:
-            raise RealGloveError("缺少 encos_hand SDK；请在 sim 的 Pixi 环境中运行") from exc
-        if self.ports is None:
-            found = discover_ports()
-            if not found:
-                raise RealGloveError(
-                    "未发现 CANable2（USB 16d0:117e）。检查适配器、udev 规则和用户组；"
-                    "离线演示请用默认 sim 命令（假手套）。"
-                )
-            self.ports = {i + 1: port for i, port in enumerate(found[:3])}
-        self._hand = EncosHand(port_map=self.ports, announce_connection=True)
+        if self.driver == 2:
+            self._hand = self._make_driver2()
+        else:
+            self._hand = self._make_driver1()
         try:
             self._hand.connect()
             self._hand.scan()
             self._opened_ns = time.monotonic_ns()
             online = tuple(sorted(self._hand.get_online_ids()))
             if online != tuple(range(1, 13)):
-                raise RealGloveError(f"必须 12 个电机在线，当前在线={online}")
+                missing = sorted(set(range(1, 13)) - set(online))
+                raise RealGloveError(
+                    f"{self.driver_name}：必须 12 个电机在线，当前在线={online}，无应答={missing}"
+                    "（检查手套电源和 CAN 线）")
             state = self.read()
             bad = {mid: err for mid, err in state.errors.items() if err}
             if bad:
                 raise RealGloveError(f"电机报警: {bad}")
             return state
-        except Exception:
+        except RealGloveError:
             self.close()
             raise
+        except Exception as error:
+            self.close()
+            raise RealGloveError(f"{self.driver_name}: {error}") from error
+
+    def _make_driver1(self):
+        try:
+            from encos_hand import EncosHand
+        except ImportError as exc:
+            raise RealGloveError("缺少 encos_hand SDK；请在 sim 的 Pixi 环境中运行") from exc
+        if self.ports is None:
+            found = discover_ports(1)
+            if not found:
+                raise RealGloveError(
+                    "驱动 1：未发现 CANable2（USB 16d0:117e）。检查适配器、udev 规则和用户组；"
+                    "新固件网关请用 --driver 2；离线演示请用默认 sim 命令（假手套）。"
+                )
+            self.ports = {i + 1: port for i, port in enumerate(found[:3])}
+        return EncosHand(port_map=self.ports, announce_connection=True)
+
+    def _make_driver2(self):
+        from .driver2 import Driver2Error, GatewayHand
+        port = self.driver2.get("port") or "auto"
+        if port == "auto":
+            found = discover_ports(2)
+            if not found:
+                raise RealGloveError(
+                    "驱动 2：未发现网关串口（CH340 等 USB 串口）。检查 Type-C 线；"
+                    "旧的 3×CANable2 方案请用 --driver 1。")
+            if len(found) > 1:
+                raise RealGloveError(f"驱动 2：发现多个候选串口 {found}，请在 glove.driver2.port 指定")
+            port = found[0]
+        try:
+            return GatewayHand(port, baud=int(self.driver2.get("baud", 921600)),
+                               hz=int(self.driver2.get("hz", 200)))
+        except Driver2Error as exc:
+            raise RealGloveError(str(exc)) from exc
+
+    @property
+    def driver_name(self) -> str:
+        return DRIVER_NAMES[self.driver]
 
     def read(self) -> GloveState:
         if self._hand is None:
