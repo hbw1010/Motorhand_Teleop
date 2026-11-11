@@ -1,0 +1,145 @@
+{
+  "calibrated": true,
+  "home_current_a": 1.0,
+  "home_current_a_by_motor": {
+    "1": 1.5
+  },
+  "id_order_confirmed": true,
+  "direction_confirmed": true,
+  "mapping_source": "user_confirmed_thumb_1_to_4_then_index_to_pinky",
+  "limits_reference": "raw_motor_deg_converted_from_zero_relative_limits",
+  "motors": {
+    "1": {
+      "joint": "thumb_cmc_flex",
+      "zero_deg": -55.01250457763672,
+      "sign": 1.0,
+      "scale": 1.0,
+      "min_deg": -145.01250457763672,
+      "max_deg": 34.98749542236328,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "2": {
+      "joint": "thumb_cmc_abd",
+      "zero_deg": 19.60647201538086,
+      "sign": 1.0,
+      "scale": 1.0,
+      "min_deg": -70.39352798461914,
+      "max_deg": 109.60647201538086,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "3": {
+      "joint": "thumb_mcp",
+      "zero_deg": -32.91973114013672,
+      "sign": 1.0,
+      "scale": 1.0,
+      "min_deg": -32.91973114013672,
+      "max_deg": 57.08026885986328,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "4": {
+      "joint": "thumb_ip",
+      "zero_deg": 31.658449172973633,
+      "sign": -1.0,
+      "scale": 1.0,
+      "min_deg": -58.34155082702637,
+      "max_deg": 31.658449172973633,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "5": {
+      "joint": "index_mcp_flex",
+      "zero_deg": -2.4340226650238037,
+      "sign": 1.0,
+      "scale": 1.0,
+      "min_deg": -2.4340226650238037,
+      "max_deg": 87.5659773349762,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "6": {
+      "joint": "index_pip",
+      "zero_deg": -48.19467544555664,
+      "sign": -1.0,
+      "scale": 1.0,
+      "min_deg": -138.19467544555664,
+      "max_deg": -48.19467544555664,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "7": {
+      "joint": "middle_mcp_flex",
+      "zero_deg": -31.536035537719727,
+      "sign": 1.0,
+      "scale": 1.0,
+      "min_deg": -31.536035537719727,
+      "max_deg": 58.46396446228027,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "8": {
+      "joint": "middle_pip",
+      "zero_deg": -57.75825119018555,
+      "sign": -1.0,
+      "scale": 1.0,
+      "min_deg": -147.75825119018555,
+      "max_deg": -57.75825119018555,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "9": {
+      "joint": "ring_mcp_flex",
+      "zero_deg": -25.544755935668945,
+      "sign": 1.0,
+      "scale": 1.0,
+      "min_deg": -25.544755935668945,
+      "max_deg": 64.45524406433105,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "10": {
+      "joint": "ring_pip",
+      "zero_deg": -43.16356658935547,
+      "sign": -1.0,
+      "scale": 1.0,
+      "min_deg": -133.16356658935547,
+      "max_deg": -43.16356658935547,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "11": {
+      "joint": "pinky_mcp_flex",
+      "zero_deg": -34.75901412963867,
+      "sign": 1.0,
+      "scale": 1.0,
+      "min_deg": -34.75901412963867,
+      "max_deg": 55.24098587036133,
+      "speed_rpm": 30.0,
+      "current_limit_a": 0.8
+    },
+    "12": {
+      "joint": "pinky_pip",
+      "zero_deg": 51.94516372680664,
+      "sign": -1.0,
+      "scale": 1.0,
+      "min_deg": -38.05483627319336,
+      "max_deg": 51.94516372680664,
+      "current_limit_a": 0.8
+    }
+  },
+  "haptic": {
+    "torque_constant_nm_per_a": null,
+    "max_current_a": 0.25,
+    "kp": 45.0,
+    "kd": 0.5
+  },
+  "zero_calibrated_fingers": [
+    "thumb",
+    "index",
+    "middle",
+    "ring",
+    "pinky"
+  ]
+}

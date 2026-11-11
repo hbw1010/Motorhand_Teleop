@@ -194,7 +194,8 @@ def test_pinky_small_displacement_and_sustained_load_reach_glove_motor():
         runtime.start()
         runtime.step()
         joints = dict.fromkeys(GLOVE_JOINTS, 0.0)
-        joints["pinky_pip"] = 0.09
+        # 指腹任务点：零位附近 Wuji PIP 有约 0.1 rad 防过伸死区；0.15 rad 手套输入对应约 0.07 rad 的 Wuji 小位移
+        joints["pinky_pip"] = 0.15
         _, motors = glove.model.evaluate(joints)
         glove.plant.motors = dict(motors)
         hand.effort[18] = 1.2

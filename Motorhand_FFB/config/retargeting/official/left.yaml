@@ -1,3 +1,6 @@
+# 任务点：指腹（scripts/generate_pad_task_points.py 生成 *_pad.urdf 的固定坐标系）。
+# segment_scaling 由同一脚本重新标定（见 fit_pad_scaling），不是手调值。
+# 原手指中心轴线版本：left_axis.yaml
 # 基于官方 WujiRetarget Hand2 配置；输入来自 vE.3.3 闭链模型重建的21点，
 # 不是 Wuji Glove SDK 原始帧。所有标定参数仍需本项目独立验证。
 #
@@ -9,7 +12,7 @@ optimizer:
   # submodule. Both IK and sim use the official assets shipped there:
   #   IK  : urdf_path  -> official hand2/hand2_beta1/body/urdf (Pinocchio; meshes not loaded)
   #   sim : mjcf_path  -> official hand2/hand2_beta1/body/mjcf (MuJoCo; meshes under hand2/hand2_beta1/body/meshes)
-  urdf_path: "../../../assets/wuji-hand2/body/urdf/left.urdf"
+  urdf_path: "../../../assets/wuji-hand2/body/urdf/left_pad.urdf"
   # Wuji Hand 2 uses anatomical link names (l_wrist / l_index_finger_pip ...).
   # link_naming maps the optimizer's logical roles onto them so the retargeting
   # code stays URDF-agnostic. fingers are ordered thumb..pinky.
@@ -17,9 +20,9 @@ optimizer:
     prefix: "l_"
     palm:    "wrist"
     fingers: [thumb, index_finger, middle_finger, ring_finger, pinky]
-    pip:     "{finger}_middle"        # PIP
-    dip:     "{finger}_distal"        # DIP
-    tip:     "{finger}_tip"           # fingertip
+    pip:     "{finger}_pad_pip"           # PIP
+    dip:     "{finger}_pad_dip"           # DIP
+    tip:     "{finger}_pad_tip"           # fingertip
     link1:   "{finger}_proximal_abd"  # MCP abduction link (finger-plane ref)
 
 retarget:
@@ -53,11 +56,11 @@ retarget:
 
   segment_scaling:
     # 骨架到 WujiHand2 的三段几何比例；不是优化损失权重。
-    thumb:  [1.0, 1.0, 1.0]
-    index:  [1.0, 1.1, 1.1]
-    middle: [1.0, 1.0, 0.98]
-    ring:   [1.1, 1.0, 1.1]
-    pinky:  [1.1, 1.05, 1.1]
+    thumb:  [1.05, 1.047, 1.029]
+    index:  [1.114, 1.134, 1.106]
+    middle: [1.056, 1.054, 1.036]
+    ring:   [1.065, 1.077, 1.056]
+    pinky:  [1.091, 1.166, 1.145]
 
   pinch_thresholds:
     index:  { d1: 2.0, d2: 4.0 }
