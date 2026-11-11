@@ -1,0 +1,38 @@
+# MuJoCo 闭环验收配置。
+# official_control 字段来自 Wuji Hand 2 官方 Control Guide；simulation 字段不是
+# 真机标定值，只用于验证控制链路、限幅和反馈符号。
+model:
+  mjcf_path: vendor/wuji-retargeting/wuji_retargeting/wuji-description/hand2/hand2_beta1/body/mjcf/right.xml
+
+
+control:
+  kp: 3.0
+  kd: 0.05
+  effort_limit_a: 1.5
+  command_rate_hz: 500.0
+  retarget_hz: 10.0
+  feedback_jacobian_hz: 0.5
+
+disturbance:
+  start_s: 0.60
+  end_s: 1.20
+  force_n: 1.0
+  target_site: r_index_finger_tip
+
+simulation:
+  dt_s: 0.001
+  # 只验证控制/反馈链路；不对未安装姿态做重力补偿假设。
+  disable_gravity: true
+  duration_s: 1.80
+  # 官方明确 effort/current 的单位是 A，但未提供 Hand2 2.2 外力矩标定。
+  # 下面两个值是模拟被控对象的显式假设，不能用于真机换算。
+  hand_torque_per_amp_nm: 0.50
+  # 优化器含限位与非线性，采用 0.01 rad 中心差分避免微步噪声放大。
+  feedback_jacobian_step_rad: 0.01
+  # 仿真反馈增益；真机必须由外力/电流标定重新确定。
+  feedback_gain: 0.10
+  glove_torque_constant_nm_a: 0.035
+  glove_current_limit_a: 1.5
+  glove_current_slew_a_s: 30.0
+  human_stiffness_nm_rad: 0.30
+  human_damping_nm_s_rad: 0.02

@@ -1,0 +1,156 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<root>
+ <tabbed_widget name="Main Window" parent="main_window">
+  <Tab containers="1" tab_name="小指：运动与力反馈">
+   <Container>
+    <DockSplitter count="1" orientation="-" sizes="1">
+     <DockSplitter count="3" orientation="|" sizes="0.333;0.333;0.334">
+      <DockSplitter count="2" orientation="-" sizes="0.5;0.5">
+       <DockArea name="手套指节 rad">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-1" left="0" right="1" top="1"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/glove_position_rad/pinky_mcp_flex/position"/>
+         <curve color="#d62728" name="/glove_bridge/glove_position_rad/pinky_pip/position"/>
+        </plot>
+       </DockArea>
+       <DockArea name="Wuji PIP 目标与反馈 rad">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-1" left="0" right="1" top="1"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/wuji_target_rad/r_pinky_pip/position"/>
+         <curve color="#d62728" name="/glove_bridge/wuji_position_rad/r_pinky_pip/position"/>
+        </plot>
+       </DockArea>
+      </DockSplitter>
+      <DockSplitter count="2" orientation="-" sizes="0.5;0.5">
+       <DockArea name="Wuji小指电流 A">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-1" left="0" right="1" top="1"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/wuji_current_a/values/r_pinky_mcp_flex"/>
+         <curve color="#d62728" name="/glove_bridge/wuji_current_a/values/r_pinky_pip"/>
+         <curve color="#2ca02c" name="/glove_bridge/wuji_current_a/values/r_pinky_dip"/>
+        </plot>
+       </DockArea>
+       <DockArea name="手套J11 J12名义前馈 Nm">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-1" left="0" right="1" top="1"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/glove_nominal_feedforward_nm/values/motor_11"/>
+         <curve color="#d62728" name="/glove_bridge/glove_nominal_feedforward_nm/values/motor_12"/>
+        </plot>
+       </DockArea>
+      </DockSplitter>
+      <DockSplitter count="2" orientation="-" sizes="0.5;0.5">
+       <DockArea name="手套J11 J12反馈电流 A">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-1" left="0" right="1" top="1"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/glove_current_a_motor_11/values/motor_11"/>
+         <curve color="#d62728" name="/glove_bridge/glove_current_a_motor_12/values/motor_12"/>
+        </plot>
+       </DockArea>
+       <DockArea name="接触及几何状态">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-1" left="0" right="1" top="6"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/contact_state_code/values/contact_state_code"/>
+         <curve color="#d62728" name="/glove_bridge/feedback_projection_code/values/feedback_projection_code"/>
+         <curve color="#2ca02c" name="/glove_bridge/stream_alive/values/stream_alive"/>
+         <curve color="#9467bd" name="/glove_bridge/telemetry_source_code/values/telemetry_source_code"/>
+        </plot>
+       </DockArea>
+      </DockSplitter>
+     </DockSplitter>
+    </DockSplitter>
+   </Container>
+  </Tab>
+  <Tab containers="1" tab_name="小指：误差与时延">
+   <Container>
+    <DockSplitter count="1" orientation="-" sizes="1">
+     <DockSplitter count="3" orientation="|" sizes="0.333;0.333;0.334">
+      <DockSplitter count="3" orientation="-" sizes="0.333;0.333;0.334">
+       <DockArea name="手套原始电机角度 deg">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-90" left="0" right="1" top="90"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/glove_raw_position_deg_motor_11/values/motor_11"/>
+         <curve color="#d62728" name="/glove_bridge/glove_raw_position_deg_motor_12/values/motor_12"/>
+        </plot>
+       </DockArea>
+       <DockArea name="Wuji目标跟踪误差 rad">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-1" left="0" right="1" top="1"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/wuji_tracking_error_rad/values/r_pinky_mcp_flex"/>
+         <curve color="#d62728" name="/glove_bridge/wuji_tracking_error_rad/values/r_pinky_pip"/>
+         <curve color="#2ca02c" name="/glove_bridge/wuji_tracking_error_rad/values/r_pinky_dip"/>
+        </plot>
+       </DockArea>
+       <DockArea name="Wuji小指速度 rad/s">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-1" left="0" right="1" top="1"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/wuji_velocity_rad_s/values/r_pinky_mcp_flex"/>
+         <curve color="#d62728" name="/glove_bridge/wuji_velocity_rad_s/values/r_pinky_pip"/>
+         <curve color="#2ca02c" name="/glove_bridge/wuji_velocity_rad_s/values/r_pinky_dip"/>
+        </plot>
+       </DockArea>
+      </DockSplitter>
+      <DockSplitter count="2" orientation="-" sizes="0.5;0.5">
+       <DockArea name="Wuji软件虚拟力矩 Nm 非实测">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-1" left="0" right="1" top="1"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/virtual_hand_torque_nm/values/r_pinky_mcp_flex"/>
+         <curve color="#d62728" name="/glove_bridge/virtual_hand_torque_nm/values/r_pinky_pip"/>
+         <curve color="#2ca02c" name="/glove_bridge/virtual_hand_torque_nm/values/r_pinky_dip"/>
+        </plot>
+       </DockArea>
+       <DockArea name="手套投影力矩 Nm 限幅前">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="-1" left="0" right="1" top="1"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/glove_projected_nominal_torque_nm/values/motor_11"/>
+         <curve color="#d62728" name="/glove_bridge/glove_projected_nominal_torque_nm/values/motor_12"/>
+        </plot>
+       </DockArea>
+      </DockSplitter>
+      <DockSplitter count="2" orientation="-" sizes="0.5;0.5">
+       <DockArea name="采样到SDK提交及周期 s">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="0" left="0" right="1" top="0.1"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/glove_sample_to_wuji_submit_s/values/glove_sample_to_wuji_submit_s"/>
+         <curve color="#d62728" name="/glove_bridge/wuji_sample_to_glove_submit_s/values/wuji_sample_to_glove_submit_s"/>
+         <curve color="#2ca02c" name="/glove_bridge/control_cycle_duration_s/values/control_cycle_duration_s"/>
+        </plot>
+       </DockArea>
+       <DockArea name="Jac年龄与反馈帧龄 s">
+        <plot flip_x="false" flip_y="false" line_width="1.0" mode="TimeSeries">
+         <range bottom="0" left="0" right="1" top="0.5"/><limitY/>
+         <curve color="#1f77b4" name="/glove_bridge/jacobian_reported_age_s/values/jacobian_reported_age_s"/>
+         <curve color="#d62728" name="/glove_bridge/wuji_frame_age_s/values/wuji_frame_age_s"/>
+         <curve color="#2ca02c" name="/glove_bridge/glove_frame_age_s/values/glove_frame_age_s"/>
+         <curve color="#9467bd" name="/glove_bridge/glove_motor_sample_spread_s/values/glove_motor_sample_spread_s"/>
+        </plot>
+       </DockArea>
+      </DockSplitter>
+     </DockSplitter>
+    </DockSplitter>
+   </Container>
+  </Tab>
+  <currentTabIndex index="0"/>
+ </tabbed_widget>
+ <use_relative_time_offset enabled="1"/>
+ <streaming_buffer_size value="20"/>
+ <!-- - - - - - - - - - - - - - - -->
+ <!-- - - - - - - - - - - - - - - -->
+ <Plugins>
+  <plugin ID="ROS2 Topic Subscriber">
+   <use_header_stamp value="true"/>
+   <discard_large_arrays value="true"/>
+   <max_array_size value="100"/>
+   <boolean_strings_to_number value="true"/>
+   <remove_suffix_from_strings value="true"/>
+   <selected_topics value="/parameter_events;/rosout;/glove_bridge/contact_state_code/names;/glove_bridge/contact_state_code/values;/glove_bridge/control_cycle_duration_s/names;/glove_bridge/control_cycle_duration_s/values;/glove_bridge/feedback_projection_code/names;/glove_bridge/feedback_projection_code/values;/glove_bridge/glove_current_a_motor_1/names;/glove_bridge/glove_current_a_motor_1/values;/glove_bridge/glove_current_a_motor_10/names;/glove_bridge/glove_current_a_motor_10/values;/glove_bridge/glove_current_a_motor_11/names;/glove_bridge/glove_current_a_motor_11/values;/glove_bridge/glove_current_a_motor_12/names;/glove_bridge/glove_current_a_motor_12/values;/glove_bridge/glove_current_a_motor_2/names;/glove_bridge/glove_current_a_motor_2/values;/glove_bridge/glove_current_a_motor_3/names;/glove_bridge/glove_current_a_motor_3/values;/glove_bridge/glove_current_a_motor_4/names;/glove_bridge/glove_current_a_motor_4/values;/glove_bridge/glove_current_a_motor_5/names;/glove_bridge/glove_current_a_motor_5/values;/glove_bridge/glove_current_a_motor_6/names;/glove_bridge/glove_current_a_motor_6/values;/glove_bridge/glove_current_a_motor_7/names;/glove_bridge/glove_current_a_motor_7/values;/glove_bridge/glove_current_a_motor_8/names;/glove_bridge/glove_current_a_motor_8/values;/glove_bridge/glove_current_a_motor_9/names;/glove_bridge/glove_current_a_motor_9/values;/glove_bridge/glove_frame_age_s/names;/glove_bridge/glove_frame_age_s/values;/glove_bridge/glove_motor_sample_spread_s/names;/glove_bridge/glove_motor_sample_spread_s/values;/glove_bridge/glove_nominal_feedforward_a/names;/glove_bridge/glove_nominal_feedforward_a/values;/glove_bridge/glove_nominal_feedforward_nm/names;/glove_bridge/glove_nominal_feedforward_nm/values;/glove_bridge/glove_position_rad;/glove_bridge/glove_projected_nominal_torque_nm/names;/glove_bridge/glove_projected_nominal_torque_nm/values;/glove_bridge/glove_raw_position_deg_motor_1/names;/glove_bridge/glove_raw_position_deg_motor_1/values;/glove_bridge/glove_raw_position_deg_motor_10/names;/glove_bridge/glove_raw_position_deg_motor_10/values;/glove_bridge/glove_raw_position_deg_motor_11/names;/glove_bridge/glove_raw_position_deg_motor_11/values;/glove_bridge/glove_raw_position_deg_motor_12/names;/glove_bridge/glove_raw_position_deg_motor_12/values;/glove_bridge/glove_raw_position_deg_motor_2/names;/glove_bridge/glove_raw_position_deg_motor_2/values;/glove_bridge/glove_raw_position_deg_motor_3/names;/glove_bridge/glove_raw_position_deg_motor_3/values;/glove_bridge/glove_raw_position_deg_motor_4/names;/glove_bridge/glove_raw_position_deg_motor_4/values;/glove_bridge/glove_raw_position_deg_motor_5/names;/glove_bridge/glove_raw_position_deg_motor_5/values;/glove_bridge/glove_raw_position_deg_motor_6/names;/glove_bridge/glove_raw_position_deg_motor_6/values;/glove_bridge/glove_raw_position_deg_motor_7/names;/glove_bridge/glove_raw_position_deg_motor_7/values;/glove_bridge/glove_raw_position_deg_motor_8/names;/glove_bridge/glove_raw_position_deg_motor_8/values;/glove_bridge/glove_raw_position_deg_motor_9/names;/glove_bridge/glove_raw_position_deg_motor_9/values;/glove_bridge/glove_sample_to_wuji_submit_s/names;/glove_bridge/glove_sample_to_wuji_submit_s/values;/glove_bridge/glove_target_position_rad;/glove_bridge/jacobian_reported_age_s/names;/glove_bridge/jacobian_reported_age_s/values;/glove_bridge/stream_alive/names;/glove_bridge/stream_alive/values;/glove_bridge/telemetry_age_at_bridge_s/names;/glove_bridge/telemetry_age_at_bridge_s/values;/glove_bridge/telemetry_source_code/names;/glove_bridge/telemetry_source_code/values;/glove_bridge/virtual_hand_torque_nm/names;/glove_bridge/virtual_hand_torque_nm/values;/glove_bridge/wuji_current_a/names;/glove_bridge/wuji_current_a/values;/glove_bridge/wuji_following_lag_estimate_s/names;/glove_bridge/wuji_following_lag_estimate_s/values;/glove_bridge/wuji_frame_age_s/names;/glove_bridge/wuji_frame_age_s/values;/glove_bridge/wuji_lag_estimate_valid/names;/glove_bridge/wuji_lag_estimate_valid/values;/glove_bridge/wuji_load_fraction/names;/glove_bridge/wuji_load_fraction/values;/glove_bridge/wuji_position_rad;/glove_bridge/wuji_sample_to_glove_submit_s/names;/glove_bridge/wuji_sample_to_glove_submit_s/values;/glove_bridge/wuji_target_rad;/glove_bridge/wuji_tracking_error_rad/names;/glove_bridge/wuji_tracking_error_rad/values;/glove_bridge/wuji_velocity_rad_s/names;/glove_bridge/wuji_velocity_rad_s/values"/>
+  </plugin>
+ </Plugins>
+ <!-- - - - - - - - - - - - - - - -->
+ <previouslyLoaded_Datafiles/>
+ <previouslyLoaded_Streamer name="ROS2 Topic Subscriber"/>
+ <!-- - - - - - - - - - - - - - - -->
+ <customMathEquations/>
+ <snippets/>
+ <colorMaps/>
+ <!-- - - - - - - - - - - - - - - -->
+</root>

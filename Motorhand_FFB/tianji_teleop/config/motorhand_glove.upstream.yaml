@@ -1,0 +1,31 @@
+# 与 motorhand_glove.yaml 同样的键，全部填本项目的上游 Motorhand 默认值，用来对照。
+# 本文件仍使用本项目的相对路径；不依赖其他仓库或天机工作区。
+# 不能用参数表达的两处：
+#   - 回零：worker 总是每个 worker 只回零一次、容差 0.3 rad
+#   - 跟随推力：worker 总是把每个电机的推力限在力反馈上限内
+motorhand_glove:
+  ros__parameters:
+    root: ""
+    gloves: ["right"]
+    worker: native
+    native_binary: ""
+    rate_hz: 50.0         # Motorhand 自己的 teleop
+    slot_ms: 5.0          # Motorhand 驱动写死的时隙
+    stats_s: 10.0
+    pinch_d1_cm: 2.0      # config/retargeting/official/<side>.yaml 的 pinch_thresholds
+    pinch_d2_cm: 4.0
+    pinch_weight: 0.7     # 同一 yaml 的 pinch_weight_max（原来写死在 wuji_retarget.cpp）
+    right_ports: ""
+    right_mapping: ""
+    left_ports: ""
+    left_mapping: ""
+    force_feedback: true
+    follow_hand: true
+    follow_kp: 45.0       # Motorhand 驱动写死的位置刚度
+    home_glove: true
+    # 右手限额/阻抗使用本项目 config/motorhand_feedback/ 下的文件；限额文件绑定 Wuji 序列号，
+    # worker 会核对，对不上就不出力。左手文件是模板，替换序列号并完成硬件验证后再启用。
+    right_feedback_limits: ""
+    right_feedback_contact: ""
+    left_feedback_limits: ""
+    left_feedback_contact: ""

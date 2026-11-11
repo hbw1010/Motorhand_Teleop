@@ -1,0 +1,9 @@
+{
+  "side": "L",
+  "model": "vE.3.3",
+  "actuators": 12,
+  "coordinate_reference": "V1.4 L：全部73刚体完整 XYZ 零位朝向",
+  "robot": "hand_motor_ve33_left_v14_coordinates",
+  "geometry_source_side": "R",
+  "mirrored": true
+}

@@ -1,0 +1,24 @@
+{
+  "visible_instances": 93,
+  "meshes": 93,
+  "max_visual_frame_error": 5.992758156103545e-13,
+  "bounds_m": [
+    [
+      -0.05354301273413367,
+      -0.057289192348593795,
+      -0.06436559457083837
+    ],
+    [
+      0.17550000089407009,
+      0.1285412064843427,
+      0.052852620742635414
+    ]
+  ],
+  "source_assembly_unchanged": true,
+  "whole_cad_vertex_comparison_m": {
+    "export_to_cad_max": 0.0017680566918033612,
+    "export_to_cad_p99": 0.00034157514689569016,
+    "cad_to_export_max": 0.0012072319407371013,
+    "cad_to_export_p99": 0.0006387778323197379
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "Repository-root-relative model entrypoints; SHA-256 identifies the entrypoint, not its mesh dependency tree. See THIRD_PARTY_NOTICES.md for provenance, licensing and usage limits.",
+  "models": [
+    {"id": "wuji-user-left-urdf", "format": "urdf", "path": "assets/wuji-hand2/body/urdf/left.urdf", "sha256": "f442069f455f062efdfbd026ab5436b5914d050acead236db018dd6ca37ad4f9"},
+    {"id": "wuji-user-right-urdf", "format": "urdf", "path": "assets/wuji-hand2/body/urdf/right.urdf", "sha256": "f890b6f12931be6e526869f569f94049ed931a03878099478933b1d27f1afd1d"},
+    {"id": "wuji-beta1-left-mjcf", "format": "mjcf", "path": "vendor/wuji-retargeting/wuji_retargeting/wuji-description/hand2/hand2_beta1/body/mjcf/left.xml", "sha256": "ebaa3b07854c8df1847ffbf54d9d6527e82d838d02329e4c35c6ca667b8fef89"},
+    {"id": "wuji-beta1-right-mjcf", "format": "mjcf", "path": "vendor/wuji-retargeting/wuji_retargeting/wuji-description/hand2/hand2_beta1/body/mjcf/right.xml", "sha256": "1bc53b7ca6f2eb84fc66ac736027984cd1734fa30d27f9c1f640495258d626f9"},
+    {"id": "ve33-left-tree-urdf", "format": "urdf", "path": "assets/hand_motor_ve33/hand_motor_ve33_L/hand_tree_only.urdf", "sha256": "f8462ad059b147484030e6d4c9b5cd5ab744eba41322224c0d4f24baab70657e"},
+    {"id": "ve33-right-tree-urdf", "format": "urdf", "path": "assets/hand_motor_ve33/hand_motor_ve33_R/hand_tree_only.urdf", "sha256": "482b2db21d6227be0fb4ea3c7374831796609e58b3267bf30aae49bfdb248ac0"},
+    {"id": "ve33-left-closed-mjcf", "format": "mjcf", "path": "assets/hand_motor_ve33/hand_motor_ve33_L/hand_closed_chain.xml", "sha256": "d20cb574aef473deb8bc453dc2b0cad33faed8ffb2bae1ff11789a2e8c949801"},
+    {"id": "ve33-right-closed-mjcf", "format": "mjcf", "path": "assets/hand_motor_ve33/hand_motor_ve33_R/hand_closed_chain.xml", "sha256": "99d83c9f8f19fcb7a2c301398e2a015bff7d7c5e0f499d33268670fe2a161e89"},
+    {"id": "ve33-left-studio-mjcf", "format": "mjcf", "path": "assets/hand_motor_ve33/hand_motor_ve33_L/hand_studio_preview.xml", "sha256": "7f7f75bfc59cfc03dabe8b0758a7881ccb755d8cd72636f588a1c3d7b8861642"},
+    {"id": "ve33-right-studio-mjcf", "format": "mjcf", "path": "assets/hand_motor_ve33/hand_motor_ve33_R/hand_studio_preview.xml", "sha256": "6471e91f1d3d688f6e9ada01ef5246f1c994ad5ea37ad4ccda3abf5a8e832cf7"}
+  ]
+}

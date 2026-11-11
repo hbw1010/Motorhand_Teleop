@@ -1,0 +1,6 @@
+﻿cmake_minimum_required(VERSION 3.10)
+project(lqs_g4_demo CXX)
+set(CMAKE_CXX_STANDARD 17)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include)
+add_executable(g4_control_demo g4_control_demo.cpp)
+target_link_libraries(g4_control_demo pthread)

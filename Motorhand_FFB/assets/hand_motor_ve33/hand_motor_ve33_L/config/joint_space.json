@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "side": "L",
+  "angle_unit": "rad",
+  "zero": "相对于当前CAD零位的相邻指节转角",
+  "positive_direction": "使用axis_joint的物理轴，选择与child零位参考+Z点积为正的方向；不是强制局部+Z",
+  "independent": [
+    {
+      "name": "thumb_cmc_flex_joint",
+      "parent": "base_link",
+      "child": "thumb_cmc_flex_link",
+      "axis_joint": "thumb_cmc_flex_motor_joint",
+      "motor": "thumb_cmc_flex_motor_joint",
+      "label": "拇指 CMC 屈伸"
+    },
+    {
+      "name": "thumb_cmc_abd_joint",
+      "parent": "thumb_cmc_flex_link",
+      "child": "thumb_cmc_abd_link",
+      "axis_joint": "thumb_cmc_abd_motor_joint",
+      "motor": "thumb_cmc_abd_motor_joint",
+      "label": "拇指 CMC 侧摆"
+    },
+    {
+      "name": "thumb_mcp_joint",
+      "parent": "thumb_cmc_abd_link",
+      "child": "thumb_mcp_link",
+      "axis_joint": "thumb_mcp_output_joint",
+      "motor": "thumb_mcp_motor_joint",
+      "label": "拇指 MCP 屈伸"
+    },
+    {
+      "name": "thumb_ip_joint",
+      "parent": "thumb_mcp_link",
+      "child": "thumb_ip_link",
+      "axis_joint": "thumb_ip_output_joint",
+      "motor": "thumb_ip_motor_joint",
+      "label": "拇指 IP 屈伸"
+    },
+    {
+      "name": "index_mcp_flex_joint",
+      "parent": "index_mount_link",
+      "child": "index_mcp_link",
+      "axis_joint": "index_mcp_output_joint",
+      "motor": "index_mcp_motor_joint",
+      "label": "食指 MCP 屈伸"
+    },
+    {
+      "name": "index_pip_joint",
+      "parent": "index_mcp_link",
+      "child": "index_pip_link",
+      "axis_joint": "index_pip_output_joint",
+      "motor": "index_pip_dip_motor_joint",
+      "label": "食指 PIP 屈伸"
+    },
+    {
+      "name": "middle_mcp_flex_joint",
+      "parent": "middle_mount_link",
+      "child": "middle_mcp_link",
+      "axis_joint": "middle_mcp_output_joint",
+      "motor": "middle_mcp_motor_joint",
+      "label": "中指 MCP 屈伸"
+    },
+    {
+      "name": "middle_pip_joint",
+      "parent": "middle_mcp_link",
+      "child": "middle_pip_link",
+      "axis_joint": "middle_pip_output_joint",
+      "motor": "middle_pip_dip_motor_joint",
+      "label": "中指 PIP 屈伸"
+    },
+    {
+      "name": "ring_mcp_flex_joint",
+      "parent": "ring_mount_link",
+      "child": "ring_mcp_link",
+      "axis_joint": "ring_mcp_output_joint",
+      "motor": "ring_mcp_motor_joint",
+      "label": "无名指 MCP 屈伸"
+    },
+    {
+      "name": "ring_pip_joint",
+      "parent": "ring_mcp_link",
+      "child": "ring_pip_link",
+      "axis_joint": "ring_pip_output_joint",
+      "motor": "ring_pip_dip_motor_joint",
+      "label": "无名指 PIP 屈伸"
+    },
+    {
+      "name": "pinky_mcp_flex_joint",
+      "parent": "pinky_mount_link",
+      "child": "pinky_mcp_link",
+      "axis_joint": "pinky_mcp_output_joint",
+      "motor": "pinky_mcp_motor_joint",
+      "label": "小指 MCP 屈伸"
+    },
+    {
+      "name": "pinky_pip_joint",
+      "parent": "pinky_mcp_link",
+      "child": "pinky_pip_link",
+      "axis_joint": "pinky_pip_output_joint",
+      "motor": "pinky_pip_dip_motor_joint",
+      "label": "小指 PIP 屈伸"
+    }
+  ],
+  "dependent": [
+    {
+      "name": "index_dip_joint",
+      "parent": "index_pip_link",
+      "child": "index_dip_link",
+      "axis_joint": "index_dip_output_joint",
+      "label": "食指 DIP 联动"
+    },
+    {
+      "name": "middle_dip_joint",
+      "parent": "middle_pip_link",
+      "child": "middle_dip_link",
+      "axis_joint": "middle_dip_output_joint",
+      "label": "中指 DIP 联动"
+    },
+    {
+      "name": "ring_dip_joint",
+      "parent": "ring_pip_link",
+      "child": "ring_dip_link",
+      "axis_joint": "ring_dip_output_joint",
+      "label": "无名指 DIP 联动"
+    },
+    {
+      "name": "pinky_dip_joint",
+      "parent": "pinky_pip_link",
+      "child": "pinky_dip_link",
+      "axis_joint": "pinky_dip_output_joint",
+      "label": "小指 DIP 联动"
+    }
+  ],
+  "hardware_note": "电机仍为执行器；本文件定义运动学独立输入，不改变URDF树关节的物理意义",
+  "limits_note": "未标定实物电机限位；求解使用原模型装配分支约束，预览范围不是硬件限位"
+}

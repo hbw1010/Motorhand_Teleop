@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "motorhand-ffb"
+version = "0.1.0"
+description = "Standalone Motorhand glove mapping, hand-following and force-feedback project"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "scipy>=1.11,<2",
+  "mujoco==4.0.0",
+  "python-can>=4.3",
+  "pyserial>=3.5",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[[tool.setuptools.ext-modules]]
+name = "motorhand_teleop._ve33_geometry"
+sources = ["src/motorhand_teleop/native/ve33_geometry.cpp"]
+language = "c++"
+extra-compile-args = ["-O3", "-std=c++17"]
+
+[tool.setuptools.package-data]
+motorhand_teleop = [
+  "real_hand/native/*.cpp",
+  "real_hand/native/*.h",
+  "real_hand/native/CMakeLists.txt",
+  "real_hand/native/tests/*.cpp",
+  "real_hand/native/tests/*.c",
+  "real_hand/native/tests/*.h",
+  "real_hand/native_control/*.cpp",
+  "real_hand/native_control/*.h",
+  "real_hand/native_control/*.hpp",
+  "real_hand/native_control/CMakeLists.txt",
+]
+
+[project.scripts]
+motorhand-ffb = "motorhand_teleop.cli:main"
+motorhand-ffb-real = "motorhand_teleop.real_hand.runtime:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-q"
