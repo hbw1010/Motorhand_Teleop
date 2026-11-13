@@ -216,6 +216,12 @@ WujiStatus wuji_joint_command_publisher_send(WujiJointCommandPublisher *publishe
 }
 void wuji_joint_command_publisher_close(WujiJointCommandPublisher *publisher) { delete publisher; }
 WujiStatus wuji_hand_2_enable(WujiDevice *device, const uint8_t *) {
+    const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (static_cast<uint64_t>(now) < device->scenario->clear_ready_ns.load()) {
+        ++device->scenario->ignored_enables;
+        return WUJI_STATUS_OK;
+    }
     device->scenario->enabled.store(true);
     if (device->scenario->enable_fault) device->scenario->diagnostic_fault = 8;
     return WUJI_STATUS_OK;
@@ -235,6 +241,9 @@ WujiStatus wuji_hand_2_clear_fault(WujiDevice *device, const uint8_t *) {
     ++device->scenario->clears;
     if (device->scenario->clear_failure) return WUJI_STATUS_ERR_DISCONNECTED;
     if (device->scenario->enabled) return WUJI_STATUS_ERR_INVALID_ARG;
+    device->scenario->clear_ready_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count() +
+        static_cast<uint64_t>(device->scenario->clear_busy_ms.load()) * 1000000;
     if (!device->scenario->sticky_fault) {
         device->scenario->diagnostic_fault = 0;
         device->scenario->diagnostic_code = 0;

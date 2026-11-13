@@ -26,7 +26,7 @@ class EncosHand:
     def __init__(self, port_map: Optional[Dict[int, str]] = None, config_path: Optional[str] = None,
                  *, announce_connection: bool = True):
         self.port_map = port_map
-        self.config_path = Path(config_path) if config_path else Path(__file__).resolve().parents[2] / "configs" / "joint_calibration.json"
+        self.config_path = Path(config_path) if config_path else Path(__file__).resolve().parents[2] / "configs" / "sim" / "joint_calibration.json"
         self.announce_connection = announce_connection
         self.calibrations = self._load_calibrations()
         

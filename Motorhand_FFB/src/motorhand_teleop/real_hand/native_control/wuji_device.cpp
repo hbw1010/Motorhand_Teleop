@@ -4,6 +4,8 @@
 #include <cctype>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <chrono>
 
 namespace motorhand::native {
 namespace {
@@ -50,7 +52,7 @@ WujiDevice::WujiDevice(const WujiIdentity& identity, const std::string& approved
     options.command_timeout = 0.5;
     options.feedback_timeout = 0.5;
     options.home_rate_hz = 100.0;
-    options.home_tolerance = 0.15;
+    options.home_tolerance = 0.03;
     options.home_timeout = 15.0;
     options.enable_timeout = 5.0;
     options.transition_duration = 1.5;
@@ -86,6 +88,30 @@ void WujiDevice::enable() {
     Error error{};
     const int status = real_hand_enable(hand_, error.data(), error.size());
     check("enable", status, error);
+}
+
+void WujiDevice::home(const std::atomic<bool>* stop_requested) {
+    if (stop_requested && stop_requested->load()) throw std::runtime_error("Wuji回零已取消");
+    Error error{}, stop_error{};
+    std::atomic<bool> finished{false};
+    int stop_status = 0;
+    std::thread stopper;
+    if (stop_requested) stopper = std::thread([&] {
+        while (!finished.load()) {
+            if (stop_requested->load()) {
+                // disable先设置原生interrupt，再等待控制锁；home内部因此及时退出并收尾。
+                stop_status = real_hand_disable(hand_, stop_error.data(), stop_error.size());
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    });
+    const int status = real_hand_home(hand_, error.data(), error.size());
+    finished.store(true);
+    if (stopper.joinable()) stopper.join();
+    check("home", status, error);
+    check("cancel home", stop_status, stop_error);
+    if (stop_requested && stop_requested->load()) throw std::runtime_error("Wuji回零已取消并停止");
 }
 
 void WujiDevice::send(const Vec20& positions_rad, std::uint64_t original_deadline_ns) {

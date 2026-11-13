@@ -17,7 +17,7 @@ class Ve33GloveModel:
         side = "L" if hand == "left" else "R" if hand == "right" else None
         if side is None:
             raise ValueError("hand必须为left或right")
-        root = Path(asset_root) if asset_root is not None else Path(__file__).resolve().parents[2] / "assets/hand_motor_ve33"
+        root = Path(asset_root) if asset_root is not None else Path(__file__).resolve().parents[3] / "assets/hand_motor_ve33"
         model_dir = root / f"hand_motor_ve33_{side}"
         self.kinematics = Ve33Kinematics(hand, model_dir=model_dir)
         self._reference_pose = self.kinematics.current

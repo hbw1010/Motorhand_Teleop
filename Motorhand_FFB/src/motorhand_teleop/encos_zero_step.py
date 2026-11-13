@@ -25,10 +25,11 @@ FINGER_GROUPS = (
     ("pinky", "小拇指", (11, 12)),
 )
 _DEFAULT_MAPPING = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[3]
     / "hardware"
     / "encos_dexhand"
     / "configs"
+    / "ffb"
     / "glove_mapping.json"
 )
 

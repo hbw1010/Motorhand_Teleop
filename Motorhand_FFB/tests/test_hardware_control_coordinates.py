@@ -29,7 +29,7 @@ ROOT = Path(__file__).parents[1]
 
 @pytest.fixture
 def bridge():
-    assets = ROOT / "assets" / "hand_motor_ve33"
+    assets = ROOT.parent / "assets" / "hand_motor_ve33"
     source = Ve33LandmarkSource("right", asset_root=assets)
     pipeline = GloveWujiRetargetPipeline.from_yaml(
         "right", asset_root=assets,
@@ -69,7 +69,7 @@ class HandBoundary:
 
 class GloveBoundary:
     def __init__(self, joints):
-        self.model = Ve33GloveModel("right", asset_root=ROOT / "assets" / "hand_motor_ve33")
+        self.model = Ve33GloveModel("right", asset_root=ROOT.parent / "assets" / "hand_motor_ve33")
         self.motor_names = self.model.motor_names
         self._feedback = self.model.evaluate_raw(joints)
         self.pose = self.model.to_glove_pose(self._feedback, timestamp_ns=5)
@@ -706,7 +706,7 @@ def test_offline_realtime_playback_rate_with_real_inverse_worker(bridge):
 
     hand.read_state, hand.send_target = read_hand, send_hand
     glove.read_state, glove.send_position = read_glove, send_glove
-    worker = InverseWorker("right", "right", ROOT / "assets/hand_motor_ve33",
+    worker = InverseWorker("right", "right", ROOT.parent / "assets/hand_motor_ve33",
                            ROOT / "config/retargeting/official/right.yaml", limits)
     loop = RealWujiControlLoop(
         hand, bridge, glove_driver=glove, glove_follow_actual=True,

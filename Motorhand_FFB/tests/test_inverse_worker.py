@@ -25,7 +25,7 @@ def numerical_inputs():
 
 
 def worker(limits):
-    return InverseWorker("right", "right", ROOT / "assets/hand_motor_ve33",
+    return InverseWorker("right", "right", ROOT.parent / "assets/hand_motor_ve33",
                          ROOT / "config/retargeting/official/right.yaml", limits)
 
 

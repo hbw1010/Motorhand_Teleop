@@ -54,7 +54,7 @@ class Ve33Kinematics:
         self.model_dir = (
             Path(model_dir).expanduser().resolve()
             if model_dir is not None
-            else Path(__file__).resolve().parents[2]
+            else Path(__file__).resolve().parents[3]
             / "assets" / "hand_motor_ve33" / f"hand_motor_ve33_{side}"
         )
         with (self.model_dir / "config/joint_space.json").open(encoding="utf-8") as stream:

@@ -175,7 +175,7 @@ def cmd_home_glove(args) -> int:
         print("HOME_FAIL: home-glove 调用的是驱动 1 的 encos_home.py，驱动 2 暂不支持自动回零；"
               "如需用旧适配器回零请加 --driver 1")
         return 2
-    script = SIM_ROOT.parent / "src" / "motorhand_teleop" / "encos_home.py"
+    script = SIM_ROOT.parent / "Motorhand_FFB" / "src" / "motorhand_teleop" / "encos_home.py"
     if not script.is_file():
         print(f"HOME_FAIL: 缺少 {script}")
         return 2

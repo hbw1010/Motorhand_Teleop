@@ -21,8 +21,8 @@
 | `../hardware/encos_dexhand/` | 驱动 1：Encos SDK（CANable2）与 `glove_mapping.json` / `joint_calibration.json` |
 | `../hardware/encos_g4_gateway_sdk/vendor/` | 驱动 2：厂商 STM32G4 网关 Linux C++ SDK 原样（不修改） |
 | `../hardware/encos_g4_gateway_sdk/shim/g4_shim.cpp` | 驱动 2：SDK 之上的 C 接口 + 指令超时卸力 + 接收时间戳 |
-| `../src/motorhand_teleop/encos_home.py` | 原仓库统一使能回零工具（`home-glove` 调用） |
-| `../tianji_teleop/udev/90-motorhand-glove.rules` | CANable2 普通用户访问规则 |
+| `../Motorhand_FFB/src/motorhand_teleop/encos_home.py` | 统一使能回零工具（`home-glove` 显式传入仿真标定） |
+| `../hardware/encos_dexhand/udev/90-motorhand-glove.rules` | CANable2 普通用户访问规则 |
 | `../config/feedback/` | 原仓库反馈限幅配置（当前仿真采用 `config/default.yaml` 内参数） |
 | `scripts/smoke.py` | 无硬件冒烟测试（23 项） |
 | `tests/` | pytest 离线测试 |
@@ -77,7 +77,7 @@ uv pip install --python .pixi/envs/default/bin/python \
 ```bash
 sudo groupadd -f plugdev
 sudo usermod -aG plugdev "$USER"      # 重新登录后生效
-sudo cp ../tianji_teleop/udev/90-motorhand-glove.rules /etc/udev/rules.d/
+sudo cp ../hardware/encos_dexhand/udev/90-motorhand-glove.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 lsusb | grep -i 16d0:117e
@@ -110,7 +110,7 @@ pixi run zero-glove --finger ring
 pixi run zero-glove --finger pinky
 ```
 
-写入 `../hardware/encos_dexhand/configs/glove_mapping.json` 的 `zero_deg`，同步相对限位并更新 `joint_calibration.json`；每次写入前备份到 `configs/zero_backups/`。**不固化电机硬件零位，不发送位置/MIT**。
+写入 `../hardware/encos_dexhand/configs/sim/glove_mapping.json` 的 `zero_deg`，同步相对限位并更新同目录 `joint_calibration.json`；每次写入前备份到 `configs/zero_backups/`。FFB 标定独立保存在 `configs/ffb/`，不会被此命令修改。**不固化电机硬件零位，不发送位置/MIT**。
 
 ### 4.2 统一使能回零（会让电机运动）
 
@@ -216,6 +216,8 @@ pixi run review                      # 打开最新一次记录
 pixi run review data/session-...     # 指定记录
 pixi run export-session data/session-...   # 导出 session.csv（每周期一行）
 ```
+CSV 导出按周期展开字段：12 轴列使用 `J1`…`J12` 后缀；完整场景的 `qpos` 保留在会话数据中，不写入 CSV。
+
 
 回放窗口用一个时间游标统一驱动所有视图：
 

@@ -13,9 +13,18 @@ struct ForceResult {
     Vec20 wuji_load_fraction{}; // Current-normalized proxy, not contact force.
     Vec12 model_motor_nm{};  // Nominal model-axis torque.
     std::array<bool, 20> contact{};
+    // contact含释放迟滞；只有此逐轴mask允许施加阻抗。回开/释放立即撤销。
+    std::array<bool,20> impedance_contact{};
+    std::array<int,20> contact_direction{};
     bool active{};           // Inputs and local geometry are valid, not a contact indication.
     bool linear{};
     ContactPhase phase{ContactPhase::not_configured};
+    Vec12 projected_motor_nm{}; // 未爬升/限幅/斜率处理的模型电机目标，仅用于遥测。
+    Vec20 filtered_current_a{};
+    double reflection_gain{};
+    std::array<double, 240> hand_to_motor{}; // 12x20行主序，未乘反射增益。
+    Vec20 projection_current_a{};
+    std::uint64_t projection_received_ns{};
 };
 
 class ForceController {

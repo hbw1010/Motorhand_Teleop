@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def _demo() -> None:
     pipeline = GloveWujiRetargetPipeline.from_yaml(
         "right",
-        asset_root=ROOT / "assets" / "hand_motor_ve33",
+        asset_root=ROOT.parent / "assets" / "hand_motor_ve33",
         config_path=default_retarget_config(ROOT, "right"),
     )
     result = pipeline.step({name: 0.0 for name in GLOVE_JOINTS})
@@ -31,12 +31,12 @@ def _demo() -> None:
 
 def _validate_assets() -> None:
     paths = {
-        "glove_right_urdf": ROOT / "assets/hand_motor_ve33/hand_motor_ve33_R/hand_tree_only.urdf",
-        "glove_right_closed_chain": ROOT / "assets/hand_motor_ve33/hand_motor_ve33_R/hand_closed_chain.xml",
-        "glove_right_targets": ROOT / "assets/hand_motor_ve33/hand_motor_ve33_R/config/retarget_targets.json",
-        "glove_left_urdf": ROOT / "assets/hand_motor_ve33/hand_motor_ve33_L/hand_tree_only.urdf",
-        "glove_left_closed_chain": ROOT / "assets/hand_motor_ve33/hand_motor_ve33_L/hand_closed_chain.xml",
-        "glove_left_targets": ROOT / "assets/hand_motor_ve33/hand_motor_ve33_L/config/retarget_targets.json",
+        "glove_right_urdf": ROOT / "../assets/hand_motor_ve33/hand_motor_ve33_R/hand_tree_only.urdf",
+        "glove_right_closed_chain": ROOT / "../assets/hand_motor_ve33/hand_motor_ve33_R/hand_closed_chain.xml",
+        "glove_right_targets": ROOT / "../assets/hand_motor_ve33/hand_motor_ve33_R/config/retarget_targets.json",
+        "glove_left_urdf": ROOT / "../assets/hand_motor_ve33/hand_motor_ve33_L/hand_tree_only.urdf",
+        "glove_left_closed_chain": ROOT / "../assets/hand_motor_ve33/hand_motor_ve33_L/hand_closed_chain.xml",
+        "glove_left_targets": ROOT / "../assets/hand_motor_ve33/hand_motor_ve33_L/config/retarget_targets.json",
         "wuji_right_urdf": ROOT / "assets/wuji-hand2/body/urdf/right.urdf",
         "wuji_left_urdf": ROOT / "assets/wuji-hand2/body/urdf/left.urdf",
         "retarget_right": ROOT / "config/retargeting/official/right.yaml",

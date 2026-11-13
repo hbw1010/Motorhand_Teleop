@@ -10,6 +10,7 @@
 
 namespace motorhand::native {
 class EncosDriver;
+class DriverImpedancePlanner;
 
 enum class GloveOutputMode { position, force };
 struct GloveOutputResult {
@@ -21,6 +22,12 @@ struct GloveOutputResult {
     Vec12 applied{}; // Quantized nominal model-axis value submitted to serial, not measured torque.
     ForceResult force{};
     bool force_computed{};
+    HandFrame feedback_input_hand{}; // 产生本次输出的原始从手反馈，不是UI发布时的最新帧。
+    Vec20 feedback_input_target{};
+    bool driver_impedance{};
+    DriverImpedanceSubmission impedance{};
+    DriverImpedanceObservation impedance_observation{};
+    std::uint64_t contact_evaluated_ns{}, impedance_planned_ns{};
 };
 
 // One output thread owns command computation/submission. Main control never
@@ -28,7 +35,7 @@ struct GloveOutputResult {
 // request is retained; errors latch. Every request keeps its original deadline.
 class GloveOutputWorker {
 public:
-    GloveOutputWorker(EncosDriver& driver, ForceController* force);
+    GloveOutputWorker(EncosDriver& driver, ForceController* force, DriverImpedancePlanner* impedance = nullptr);
     ~GloveOutputWorker();
     GloveOutputWorker(const GloveOutputWorker&) = delete;
     GloveOutputWorker& operator=(const GloveOutputWorker&) = delete;

@@ -69,6 +69,12 @@ public:
         return latest_snapshots_;
     }
 
+    // 项目扩展：时间来自RouteState::Accept解析位置反馈时，不在读取快照时更新。
+    std::map<JointKey, TimedHandSnapshot> GetTimedSnapshots() {
+        std::lock_guard<std::mutex> lock(snapshot_mutex_);
+        return latest_timed_snapshots_;
+    }
+
 private:
     PosixSerial serial_;
     std::atomic<bool> running_{false};
@@ -78,6 +84,7 @@ private:
     std::map<JointKey, MotorCommand> commands_;
     std::mutex snapshot_mutex_;
     std::map<JointKey, HandSnapshot> latest_snapshots_;
+    std::map<JointKey, TimedHandSnapshot> latest_timed_snapshots_;
 
     void SendReleaseBatchAll() {
         static const JointKey all_joints[] = {
@@ -112,7 +119,6 @@ private:
 
         while (running_) {
             auto t0 = std::chrono::steady_clock::now();
-            uint64_t now_us = gateway::NowUs();
 
             std::array<GatewayWireFrame, 12> tx_batch;
             size_t tx_count = 0;
@@ -139,8 +145,12 @@ private:
 
             {
                 std::lock_guard<std::mutex> lock(snapshot_mutex_);
+                // Read/Accept之后取时间，避免age_ms减去未来收包时间而无符号下溢。
+                const auto snapshot_us = gateway::NowUs();
                 for (const auto& [k, route] : routes) {
-                    latest_snapshots_[k] = route.Snapshot(now_us);
+                    auto timed = route.TimedSnapshot(snapshot_us);
+                    latest_snapshots_[k] = timed.state;
+                    latest_timed_snapshots_[k] = timed;
                 }
             }
 

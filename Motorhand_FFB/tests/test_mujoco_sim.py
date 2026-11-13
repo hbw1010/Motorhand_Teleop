@@ -25,7 +25,7 @@ def test_viewer_mount_uses_canonical_rigid_registration():
     from motorhand_teleop.mujoco_viewer import _HAND_JOINTS, _glove_to_hand_mount
     from scipy.spatial.transform import Rotation
 
-    source = Ve33LandmarkSource("right", asset_root=ROOT / "assets" / "hand_motor_ve33")
+    source = Ve33LandmarkSource("right", asset_root=ROOT.parent / "assets" / "hand_motor_ve33")
     points = source.step({name: 0.0 for name in GLOVE_JOINTS}).points_m
     mount_pos, mount_quat, registration_rms = _glove_to_hand_mount(
         ROOT,

@@ -2,9 +2,9 @@
 # All force values here are nominal/simulated unless a calibration file is supplied.
 paths:
   glove_model: ../assets/hand_motor_ve33/hand_motor_ve33_R/hand_closed_chain.xml
-  glove_mapping: ../hardware/encos_dexhand/configs/glove_mapping.json
-  feedback_limits: ../config/feedback/max-torque-linear-right.json
-  feedback_contact: ../config/feedback/contact-impedance-right.json
+  glove_mapping: ../hardware/encos_dexhand/configs/sim/glove_mapping.json
+  feedback_limits: ../config/feedback/wuji-max-torque-linear-right.json
+  feedback_contact: ../config/feedback/wuji-contact-impedance-right.json
   zero_backup_dir: ../hardware/encos_dexhand/configs/zero_backups
 
 simulation:

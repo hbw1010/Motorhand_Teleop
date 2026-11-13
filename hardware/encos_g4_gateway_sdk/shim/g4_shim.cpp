@@ -1,4 +1,4 @@
-// C ABI shim over the unmodified vendor SDK (vendor/include/HandClientG4.hpp)
+// 厂商SDK的C ABI包装（vendor/include/HandClientG4.hpp）；时间快照扩展见vendor/LOCAL_CHANGES.md。
 // for "驱动 2" (STM32G4 LQS-GW02 gateway).  Loaded from Python with ctypes.
 //
 // Only adds things *above* the SDK:
@@ -7,8 +7,7 @@
 //    vendor release frame) and then DisableJoint, instead of the SDK
 //    re-sending a stale MIT target forever;
 //  * a host receive timestamp per joint, taken when the SDK's sample counter
-//    advances (the SDK snapshot's age_ms is computed against the cycle start
-//    and is not usable as an absolute timestamp).
+//    advances（保留此旧C ABI路径的消费时间语义；原生阻抗使用SDK的GetTimedSnapshots真实解析时间）。
 #include "HandClientG4.hpp"
 
 #include <time.h>

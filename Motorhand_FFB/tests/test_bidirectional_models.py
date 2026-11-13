@@ -17,7 +17,7 @@ from motorhand_teleop.retargeting import (
 
 
 ROOT = Path(__file__).parents[1]
-ASSET_ROOT = ROOT / "assets" / "hand_motor_ve33"
+ASSET_ROOT = ROOT.parent / "assets" / "hand_motor_ve33"
 
 
 def _bridge() -> BidirectionalRetargeter:

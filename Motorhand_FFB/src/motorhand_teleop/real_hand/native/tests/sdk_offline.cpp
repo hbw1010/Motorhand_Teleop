@@ -16,7 +16,7 @@ uint64_t command_deadline() {
 }
 RealHandOptions options(int side = 1) {
     return {2, side, "离线设备身份", "", "offline-fw", "offline-fw", 1.5, 8, 3, .5, .2,
-            200, .005, 1.5, .1, .04, 1.5, 3, .05, 20, 1};
+            200, .005, 1.5, .3, .04, 1.5, 3, .05, 20, 1};
 }
 struct Session {
     std::shared_ptr<fake_sdk::Scenario> scenario = std::make_shared<fake_sdk::Scenario>();
@@ -44,6 +44,18 @@ struct Session {
     }
     void close() { expect(real_hand_close(handle, error, sizeof(error)) == 0, error); }
 };
+void asynchronous_clear_before_enable() {
+    Session s(1, true);
+    s.scenario->clear_busy_ms = 60;
+    s.connect();
+    s.enable();
+    const auto state = s.read();
+    expect(s.scenario->ignored_enables == 0 && s.scenario->clears == 1,
+           "新鲜Ready帧不是清错完成回执；不得过早使能或反复重发清错/使能");
+    expect(std::all_of(std::begin(state.enabled), std::end(state.enabled),
+                       [](auto v) { return v == 1; }), "等待清错完成后必须确认全部关节使能");
+    s.close();
+}
 void version_gate() {
     expect(real_hand_abi_version() == 6, "生产库必须完整切换到ABI6");
     fake_sdk::set_version("2026.10.12");
@@ -376,6 +388,7 @@ void device_configuration_is_not_replaced_by_project_defaults() {
 }
 int main() {
     try {
+        asynchronous_clear_before_enable();
         emergency_requires_explicit_disable();
         version_gate(); identity_and_order(); malformed_callbacks(); retarget_float_boundaries();
         optional_feedback_unavailable_and_recovery();

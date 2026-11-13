@@ -248,10 +248,10 @@ def create_inference_session(*, serial_number: str | None = None, address: str |
     duration = int(transition_s * 1e9)
     if not duration:
         raise ValueError("transition_s is shorter than one nanosecond")
-    paths = (asset_root or _PROJECT_ROOT / "assets/hand_motor_ve33",
+    paths = (asset_root or _PROJECT_ROOT.parent / "assets/hand_motor_ve33",
              _PROJECT_ROOT / "config/retargeting/official" / (hand + ".yaml"),
-             mapping_path or _PROJECT_ROOT / "hardware/encos_dexhand/configs/glove_mapping.json",
-             feedback_path or _PROJECT_ROOT / "config/feedback/max-torque-linear-right.json",
-             contact_path or _PROJECT_ROOT / "config/feedback/contact-impedance-right.json")
+             mapping_path or _PROJECT_ROOT.parent / "hardware/encos_dexhand/configs/ffb/glove_mapping.json",
+             feedback_path or _PROJECT_ROOT.parent / "config/feedback/wuji-max-torque-linear-right.json",
+             contact_path or _PROJECT_ROOT.parent / "config/feedback/wuji-contact-impedance-right.json")
     strings = [os.fsencode(p) for p in paths] + [(serial_number or "").encode(), approved_firmware.encode()]
     return InferenceSession(_Options(*strings, int(hand == "left"), duration))

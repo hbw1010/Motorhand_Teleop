@@ -69,7 +69,7 @@ def create_retargeter(
 ) -> BidirectionalRetargeter:
     """仅用本项目资产；两侧左右手独立配置，通过同一canonical任务空间配对。"""
     root = Path(project_root) if project_root is not None else Path(__file__).resolve().parents[3]
-    assets = Path(asset_root) if asset_root is not None else root / "assets" / "hand_motor_ve33"
+    assets = Path(asset_root) if asset_root is not None else root.parent / "assets" / "hand_motor_ve33"
     config = Path(config_path) if config_path is not None else default_retarget_config(root, hand)
     source = Ve33LandmarkSource(glove_hand, asset_root=assets)
     forward = GloveWujiRetargetPipeline(

@@ -3,6 +3,7 @@
 // device; they observe ordering and inject failures, not physical behavior.
 #include "../src/motorhand_teleop/real_hand/native_control/glove_output.hpp"
 #include "../src/motorhand_teleop/real_hand/native_control/encos_driver.hpp"
+#include "../src/motorhand_teleop/real_hand/native_control/driver_impedance.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -33,6 +34,7 @@ struct Fake {
     std::condition_variable cv;
     std::vector<std::string> events;
     std::vector<Vec12> position, torque;
+    std::vector<DriverImpedanceCommand> impedance;
     std::array<std::uint64_t, 12> stamps{};
     bool block = false, entered = false, fail = false;
     void wait_entered() {
@@ -44,7 +46,7 @@ struct Fake {
     }
     void reset() {
         std::lock_guard<std::mutex> lock(mutex);
-        events.clear(); position.clear(); torque.clear(); stamps = {};
+        events.clear(); position.clear(); torque.clear(); impedance.clear(); stamps = {};
         block = entered = fail = false;
     }
 } fake;
@@ -70,6 +72,12 @@ EncosDriver::EncosDriver(const std::string&, const std::string&) : impl_(std::ma
 EncosDriver::~EncosDriver() = default;
 Vec12 EncosDriver::write_position(const Vec12& v, std::uint64_t d) { return write_fake(v, d, false); }
 Vec12 EncosDriver::write_torque(const Vec12& v, std::uint64_t d) { return write_fake(v, d, true); }
+DriverImpedanceSubmission EncosDriver::write_impedance(const DriverImpedanceCommand& c, std::uint64_t d) {
+    std::lock_guard<std::mutex> lock(fake.mutex);
+    if (now_ns()>=d) throw std::runtime_error("expired impedance");
+    fake.events.push_back("impedance");fake.impedance.push_back(c);fake.stamps.fill(now_ns());
+    DriverImpedanceSubmission r;r.command=c;r.nominal_nm=c.feedforward_nm;r.friction_nm=c.feedforward_nm;return r;
+}
 void EncosDriver::enable_force() {
     std::lock_guard<std::mutex> lock(fake.mutex); fake.events.push_back("enable_force");
 }
@@ -206,6 +214,37 @@ void failure_test(bool expired) {
     rejects([&] { worker.submit_position(command(2), now_ns(), now_ns() + 5'000'000'000ULL); }, "failed worker accepted command");
     rejects([&] { worker.close(); }, "close did not report worker failure");
 }
+void driver_impedance_route_test() {
+    fake.reset(); EncosDriver driver("", ""); Vec12 v{}; std::array<int,12> map{};
+    ForceController force("", "", v, v, map);
+    std::array<EncosMotorCalibration,12> cal{};
+    for(int i=0;i<12;++i)cal[i]={i+1,0,1,1,-170,170,-2,2,4,true};
+    DriverImpedanceConfig cfg;cfg.ramp_s=0;DriverImpedancePlanner planner(cfg,.3,cal);
+    GloveOutputWorker worker(driver,&force,&planner);worker.enter_force();
+    HandFrame hand;GloveFrame glove;GlovePose pose;JacobianSnapshot jac;
+    for(int i=0;i<12;++i){pose.motor_jacobian[i*12+i]=1;jac.jacobian[i*12+i]=1;}
+    auto send=[&](bool geometry){hand.received_ns=glove.oldest_ns=now_ns();glove.received_ns.fill(glove.oldest_ns);jac.source_ns=glove.oldest_ns;
+        auto id=worker.submit_force(Vec20{},hand,glove,pose,geometry?std::optional<JacobianSnapshot>(jac):std::nullopt,glove.oldest_ns+99'000'000);
+        return completion(worker,id);};
+    auto r=send(true);
+    require(r&&r->driver_impedance,"新模式必须走驱动阻抗分支");
+    require(r->contact_evaluated_ns>=hand.received_ns&&r->impedance_planned_ns>=r->contact_evaluated_ns&&
+            r->last_write_ns>=r->impedance_planned_ns,"软件判据、规划与提交必须携带各自完成时间");
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));glove.motor_rad.fill(.02);r=send(true);
+    require(r&&r->applied[0]>.2&&r->impedance.friction_nm[0]>.2,"自由摩擦必须到达阻抗提交结果");
+    const auto original_source=glove.received_ns;const auto original_position=glove.motor_rad;
+    glove.received_ns.fill(now_ns());glove.motor_rad.fill(1.2);
+    require(r->impedance_observation.input_rad==original_position&&r->impedance_observation.source_ns==original_source&&
+            r->impedance_observation.filtered_velocity_rad_s[0]>0,"完成结果必须保留其原始手套规划输入和滤波速度，不受当前帧覆盖");
+    r=send(false);require(r&&r->applied[0]==0,"缺失几何必须提交精确撤力命令");
+    require(!r->impedance_observation.proxy_valid[0]&&r->impedance_observation.source_ns==glove.received_ns&&
+        (r->impedance_observation.axes[0].reasons&static_cast<std::uint64_t>(ImpedanceReason::inactive_geometry)),
+        "缺失几何的已完成撤力必须保留输入、无效代理和实际原因");
+    {std::lock_guard<std::mutex> lock(fake.mutex);require(fake.torque.empty(),"驱动阻抗不能叠加旧反射转矩");}
+    worker.enter_position(now_ns()+99'000'000);
+    {std::lock_guard<std::mutex> lock(fake.mutex);require(fake.impedance.size()==4&&fake.impedance.back().kp[0]==0&&fake.impedance.back().feedforward_nm[0]==0,"切换必须通过阻抗接口撤力");}
+    worker.close();
+}
 void close_test() {
     fake.reset(); EncosDriver driver("", ""); GloveOutputWorker worker(driver, nullptr);
     ReleaseOnExit release_on_exit;
@@ -219,7 +258,7 @@ void close_test() {
 }
 }
 int main() {
-    try { latest_test(); switch_and_force_test(); failure_test(false); failure_test(true); close_test(); }
+    try { driver_impedance_route_test(); latest_test(); switch_and_force_test(); failure_test(false); failure_test(true); close_test(); }
     catch (const std::exception& e) { fake.release(); std::cerr << e.what() << '\n'; return 1; }
     return 0;
 }

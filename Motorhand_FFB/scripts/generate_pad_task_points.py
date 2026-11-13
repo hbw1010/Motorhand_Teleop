@@ -14,7 +14,7 @@
 * config/retargeting/official/{side}.yaml：urdf_path 与 link_naming 指向指腹坐标系；
   原轴线配置保存为 {side}_axis.yaml
 * segment_scaling 重新标定：以轴线配置在手套零位输出的 Wuji 姿态为参照，逐点最小二乘
-* assets/hand_motor_ve33/hand_motor_ve33_{L,R}/config/retarget_targets.json：
+* ../assets/hand_motor_ve33/hand_motor_ve33_{L,R}/config/retarget_targets.json：
   local_xyz_m 换成指腹点，原值保存在 axis_local_xyz_m
 """
 from __future__ import annotations
@@ -114,7 +114,7 @@ def _finger(hand: _Hand, axis_points, distal_mesh, flex_link, flex_frame, flex_l
 
 def glove(side: str, inset_m: float) -> dict:
     s = "L" if side == "left" else "R"
-    base = ROOT / "assets/hand_motor_ve33" / f"hand_motor_ve33_{s}"
+    base = ROOT.parent / "assets/hand_motor_ve33" / f"hand_motor_ve33_{s}"
     hand = _Hand(base / "hand_tree_only.urdf")
     path = base / "config/retarget_targets.json"
     cfg = json.loads(path.read_text(encoding="utf-8"))
@@ -205,7 +205,7 @@ def fit_pad_scaling(side: str) -> dict:
     s = "L" if side == "left" else "R"
     cfg_dir = ROOT / "config/retargeting/official"
     axis_assets = ROOT / "build/pad_fit_axis_assets" / side
-    base = ROOT / "assets/hand_motor_ve33" / f"hand_motor_ve33_{s}"
+    base = ROOT.parent / "assets/hand_motor_ve33" / f"hand_motor_ve33_{s}"
     # Axis-mode glove targets: the same asset tree with the axis site offsets.
     target = axis_assets / f"hand_motor_ve33_{s}"
     if target.exists():
@@ -235,7 +235,7 @@ def fit_pad_scaling(side: str) -> dict:
         q[model.joints[model.getJointId(name)].idx_q] = value
     pin.framesForwardKinematics(model, data, q)
     wrist = data.oMf[model.getFrameId(f"{p}_wrist")].translation
-    source = Ve33LandmarkSource(side, asset_root=ROOT / "assets/hand_motor_ve33")
+    source = Ve33LandmarkSource(side, asset_root=ROOT.parent / "assets/hand_motor_ve33")
     frame = source.step(zero)
     glove_vectors = (frame.points_m - frame.points_m[0]) @ source.model_to_canonical_row @ source.canonical_to_optimizer_row
     fit, residual = {}, {}

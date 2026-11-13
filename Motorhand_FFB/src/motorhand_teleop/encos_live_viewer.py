@@ -115,7 +115,7 @@ def _retarget_inputs(root: Path, retarget: str) -> tuple[Path, Path]:
     """(手套 asset_root, Wuji yaml)。axis 用生成脚本留下的轴线资产副本。"""
     config = root / "config/retargeting/official"
     if retarget == "pad":
-        return root / "assets" / "hand_motor_ve33", config / "right.yaml"
+        return root.parent / "assets" / "hand_motor_ve33", config / "right.yaml"
     assets = root / "build/pad_fit_axis_assets/right"
     if not (assets / "hand_motor_ve33_R/config/retarget_targets.json").exists():
         raise RuntimeError("缺少轴线资产副本；先运行 python scripts/generate_pad_task_points.py")
@@ -208,8 +208,14 @@ def _demo_pinch(elapsed: float, poses) -> tuple[str, dict[str, float]]:
     """每 4 s 一指：张开 → 捏合 → 停留 → 张开。"""
     finger, target = poses[int(elapsed // 4.0) % len(poses)]
     t = (elapsed % 4.0) / 4.0
-    s = 0.5 * (1.0 - np.cos(np.pi * min(t / 0.35, 1.0))) if t < 0.35 else 1.0 if t < 0.6 else \
-        0.5 * (1.0 + np.cos(np.pi * (t - 0.6) / 0.35)) if t < 0.95 else 0.0
+    if t < 0.35:
+        s = 0.5 * (1.0 - np.cos(np.pi * min(t / 0.35, 1.0)))
+    elif t < 0.6:
+        s = 1.0
+    elif t < 0.95:
+        s = 0.5 * (1.0 + np.cos(np.pi * (t - 0.6) / 0.35))
+    else:
+        s = 0.0
     return finger, {name: s * value for name, value in target.items()}
 
 
@@ -221,8 +227,9 @@ def run_live_viewer(
     project_root: str | Path = _DEFAULT_ROOT, *, mapping_path: str | Path | None = None,
     driver: str = "2", port: str = "auto", layout: str = "side", gap_m: float = 0.13,
     retarget: str = "pad", demo: str | None = None, markers: bool = True, trace: int | None = None,
+    pinch: dict[str, float] | None = None, match_simulation: bool = False,
 ) -> None:
-    root = Path(project_root)
+    root = Path(project_root).expanduser().resolve()
     asset_root, yaml_path = _retarget_inputs(root, retarget)
     glove = None
     if demo is None:
@@ -231,24 +238,33 @@ def run_live_viewer(
             from .real_hand.encos_gateway import gateway_hand_factory
             hand_factory = gateway_hand_factory(port)
         glove = EncosGloveHardwareDriver(
-            hand="right", asset_root=root / "assets" / "hand_motor_ve33", config_path=mapping_path,
+            hand="right", asset_root=root.parent / "assets" / "hand_motor_ve33", config_path=mapping_path,
             hand_factory=hand_factory,
         )
+    sim_pose = None
+    if glove is not None and match_simulation:
+        from .viewer import SimulationGlovePose
+        sim_pose = SimulationGlovePose(glove.config_path, root.parent / "assets" / "hand_motor_ve33")
     pipeline = GloveWujiRetargetPipeline.from_yaml(
         "right", asset_root=asset_root, config_path=yaml_path, estimate_jacobian=False,
     )
+    if pinch:
+        from .viewer import apply_pinch
+        apply_pinch(pipeline, **pinch)
     if tuple(pipeline.retargeter.output_joint_names) != _HAND_JOINTS:
         raise RuntimeError("Hand2仿真关节顺序与重定向输出不一致")
     landmarks = pipeline.landmarks
 
-    def solve(joints: dict[str, float]):
-        frame = landmarks.step(joints)
+    def retarget(frame):
         q = pipeline.retargeter.step(
             frame.points_m, apply_filter=False,
             model_to_canonical_row=landmarks.model_to_canonical_row,
             canonical_to_optimizer_row=landmarks.canonical_to_optimizer_row,
         )
         return frame, q
+
+    def solve(joints: dict[str, float]):
+        return retarget(landmarks.step(joints))
 
     zero = {name: 0.0 for name in GLOVE_JOINTS}
     zero_frame, zero_target = solve(zero)
@@ -302,11 +318,18 @@ def run_live_viewer(
             viewer.cam.elevation = -18.0
             while viewer.is_running():
                 if glove is not None:
-                    state = glove.read_state()
-                    joints = {name: float(state.pose.joints[name]) for name in GLOVE_JOINTS}
-                    frame, q = solve(joints)
-                    # SDK反馈已完成电机正解；显示直接使用同一真实装配，不再反解q。
-                    _set_glove_pose(model, data, state.tree_positions_rad)
+                    if sim_pose is not None:
+                        raw, feedback, _ = glove._read_raw_state()
+                        tree = sim_pose.solve(raw)
+                        frame, q = retarget(landmarks.evaluate_tree(tree))
+                        joints = {name: float(frame.glove_pose.joints[name]) for name in GLOVE_JOINTS}
+                    else:
+                        state = glove.read_state()
+                        feedback = state.feedback_by_motor
+                        joints = {name: float(state.pose.joints[name]) for name in GLOVE_JOINTS}
+                        frame, q = solve(joints)
+                        tree = state.tree_positions_rad
+                    _set_glove_pose(model, data, tree)
                 else:
                     if pinch_poses is not None:
                         _, joints = _demo_pinch(time.monotonic() - start, pinch_poses)
@@ -331,7 +354,7 @@ def run_live_viewer(
                 now = time.monotonic()
                 if trace is not None and now - last_trace >= 0.1:
                     values = np.array([
-                        float(state.feedback_by_motor[trace]["angle_deg"]),
+                        float(feedback[trace]["angle_deg"]),
                         math.degrees(joints[trace_joint]),
                         math.degrees(data.qpos[int(trace_mj.qposadr[0])]),
                         math.degrees(q[_HAND_JOINTS.index(trace_hand)]),
@@ -354,7 +377,7 @@ def run_live_viewer(
                         glove_vector = np.asarray([joints[name] for name in GLOVE_JOINTS], dtype=np.float64)
                         raw_angles = {
                             motor_id: float(values["angle_deg"])
-                            for motor_id, values in state.feedback_by_motor.items()
+                            for motor_id, values in feedback.items()
                             if "angle_deg" in values
                         }
                         _print_axis_table(glove, raw_angles, glove_vector, q, previous_glove, previous_hand)

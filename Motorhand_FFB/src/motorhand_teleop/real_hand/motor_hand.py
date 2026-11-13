@@ -952,7 +952,7 @@ class EncosGloveHardwareDriver:
 
 
 def _default_mapping_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "hardware" / "encos_dexhand" / "configs" / "glove_mapping.json"
+    return Path(__file__).resolve().parents[4] / "hardware" / "encos_dexhand" / "configs" / "ffb" / "glove_mapping.json"
 
 
 def _default_hand_factory():

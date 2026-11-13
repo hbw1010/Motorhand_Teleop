@@ -576,9 +576,12 @@ class Session:
                 cols.append(key)
                 mats.append(arr[:, None].astype(float))
             else:
-                names = joints if arr.shape[1] == 12 else (
-                    list(CONTACT_FINGERS) if arr.shape[1] == len(CONTACT_FINGERS)
-                    else [str(j) for j in range(arr.shape[1])])
+                if arr.shape[1] == 12:
+                    names = joints
+                elif arr.shape[1] == len(CONTACT_FINGERS):
+                    names = list(CONTACT_FINGERS)
+                else:
+                    names = [str(j) for j in range(arr.shape[1])]
                 cols += [f"{key}_{n}" for n in names]
                 mats.append(arr.astype(float))
         table = np.hstack(mats)

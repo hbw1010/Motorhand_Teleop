@@ -1,4 +1,5 @@
 # Pixi environment
+.pixi/
 sim/.pixi/
 
 # Python caches and build metadata
@@ -21,3 +22,8 @@ MUJOCO_LOG.TXT
 .DS_Store
 .idea/
 .vscode/
+
+# Local analysis artifacts and calibration history
+/output/
+/tmp/
+/hardware/encos_dexhand/configs/zero_backups/

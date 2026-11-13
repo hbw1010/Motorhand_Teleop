@@ -102,7 +102,7 @@ def run_force_feedback_simulation(project_root: str | Path, config_path: str | P
 
     pipeline = GloveWujiRetargetPipeline.from_yaml(
         "right",
-        asset_root=root / "assets" / "hand_motor_ve33",
+        asset_root=root.parent / "assets" / "hand_motor_ve33",
         config_path=default_retarget_config(root, "right"),
         estimate_jacobian=True,
     )

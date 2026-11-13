@@ -1,4 +1,0 @@
-# Motorhand exoskeleton glove: its CANable2 USB-CAN adapters (slcan serial), readable by plugdev without sudo,
-# and kept away from ModemManager, which would otherwise probe them as modems.
-#   sudo cp 90-motorhand-glove.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
-SUBSYSTEM=="tty", ATTRS{idVendor}=="16d0", ATTRS{idProduct}=="117e", MODE="0660", GROUP="plugdev", ENV{ID_MM_DEVICE_IGNORE}="1"

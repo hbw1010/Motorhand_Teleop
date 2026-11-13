@@ -14,8 +14,11 @@ _FINGER_NAMES = ("index", "middle", "ring", "pinky")
 
 
 def wuji_hand2_joint_names(hand: str) -> tuple[str, ...]:
-    prefix = "r_" if hand == "right" else "l_" if hand == "left" else None
-    if prefix is None:
+    if hand == "right":
+        prefix = "r_"
+    elif hand == "left":
+        prefix = "l_"
+    else:
         raise ValueError("hand必须为left或right")
     names = [
         f"{prefix}thumb_cmc_flex",

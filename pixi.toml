@@ -1,0 +1,100 @@
+# 唯一的 pixi 工作区：sim/（手套 MuJoCo 仿真）与 Motorhand_FFB/（Glove→Wuji 链路）共用一个环境。
+# 任务在各自子目录运行（cwd）；名称与原来相同，只有 test 拆成 test-sim / test-ffb。
+[workspace]
+name = "motorhand-teleop"
+version = "0.1.0"
+description = "Motorhand 手套：MuJoCo 力反馈仿真 + Glove→Wuji Hand 2 双向重定向与力反馈"
+channels = ["conda-forge"]
+platforms = [{ platform = "linux-64", glibc = "2.34" }]
+
+[dependencies]
+python = ">=3.12,<3.13"
+numpy = ">=1.26,<3"
+scipy = ">=1.11,<2"
+pyyaml = ">=6,<7"
+pinocchio = ">=3.8,<4"
+nlopt = ">=2.7,<3"
+matplotlib-base = ">=3.8,<4"
+pytest = ">=8,<9"
+python-can = ">=4.3.0"
+pyserial = ">=3.5"
+pyqt = ">=5.15"
+cxx-compiler = ">=1.11,<2"
+cmake = ">=3.22"
+tinyxml2 = ">=10,<12"
+yaml-cpp = ">=0.7,<1"
+nlohmann_json = ">=3.11,<4"
+openssl = ">=3,<4"
+
+[pypi-dependencies]
+mujoco = "==4.0.0"
+dearpygui = ">=2.0,<3"
+wuji-sdk = "==2026.8.31"
+# 两个子项目都依赖 encos-hand（SDK 代码相同），统一用仓库根目录这份。
+encos-hand = { path = "hardware/encos_dexhand", editable = true }
+glove-sim = { path = "sim", editable = true }
+motorhand-ffb = { path = "Motorhand_FFB", editable = true }
+wuji-retargeting = { path = "Motorhand_FFB/vendor/wuji-retargeting", editable = true }
+
+[activation.env]
+PYTHONNOUSERSITE = "1"
+OMP_NUM_THREADS = "1"
+OPENBLAS_NUM_THREADS = "1"
+
+[tasks]
+test = { depends-on = ["test-sim", "test-ffb"] }
+
+# ---- sim/：手套 MuJoCo 力反馈仿真 ----
+smoke = { cmd = "python scripts/smoke.py", cwd = "sim" }
+sim = { cmd = "python -m glove_sim.cli sim", cwd = "sim" }
+teleop = { cmd = "python -m glove_sim.cli teleop", cwd = "sim" }
+check-glove = { cmd = "python -m glove_sim.cli check-glove", cwd = "sim" }
+build-driver2 = { cmd = "python -c 'from glove_sim.sdk.driver2 import build_shim; print(build_shim(force=True))'", cwd = "sim" }
+zero-glove = { cmd = "python -m glove_sim.cli zero-glove", cwd = "sim" }
+home-glove = { cmd = "python -m glove_sim.cli home-glove", cwd = "sim" }
+record = { cmd = "python -m glove_sim.cli record", cwd = "sim" }
+replay = { cmd = "python -m glove_sim.cli replay", cwd = "sim" }
+review = { cmd = "python -m glove_sim.cli review", cwd = "sim" }
+export-session = { cmd = "python -m glove_sim.cli export-session", cwd = "sim" }
+test-sim = { cmd = "python -m pytest -q", cwd = "sim" }
+
+# ---- Motorhand_FFB/：Glove→Wuji 重定向、跟随与力反馈（原 -e hardware 已并入默认环境）----
+demo = { cmd = "python -m motorhand_teleop.cli demo", cwd = "Motorhand_FFB" }
+validate-assets = { cmd = "python -m motorhand_teleop.cli validate-assets", cwd = "Motorhand_FFB" }
+test-ffb = { cmd = "python -m pytest -q", cwd = "Motorhand_FFB" }
+test-glove-chain = { cmd = "python -m pytest -o addopts='' tests/test_ve33_native.py tests/test_ve33_motor_roundtrip.py tests/test_ve33_adapter.py tests/test_encos_hardware.py tests/test_encos_controller.py tests/test_encos_zero_step.py tests/test_hardware_control_coordinates.py tests/test_bidirectional.py tests/test_bidirectional_models.py tests/test_landmarks.py tests/test_retargeting.py tests/test_feedback.py tests/test_force_feedback.py tests/test_force_geometry.py tests/test_contact_feedback.py tests/test_contact_latency.py tests/test_contact_runtime.py tests/test_force_linear.py tests/test_curve_telemetry.py tests/test_wuji_native.py tests/test_forward_worker.py tests/test_real_hand_runtime.py tests/test_inverse_realtime.py tests/test_training_assets.py tests/test_mujoco_sim.py -q --tb=short", cwd = "Motorhand_FFB" }
+test-record-replay = { cmd = "python -m pytest -o addopts='' tests/test_trajectory.py tests/test_playback.py tests/test_forward_worker.py tests/test_inverse_worker.py tests/test_inverse_realtime.py tests/test_hardware_control_coordinates.py tests/test_bidirectional.py tests/test_real_hand_runtime.py tests/test_contact_runtime.py -q --tb=short", cwd = "Motorhand_FFB" }
+strict-validation = { cmd = "python -m motorhand_teleop.validation", cwd = "Motorhand_FFB" }
+mujoco-force-feedback = { cmd = "python -m motorhand_teleop.mujoco_sim", cwd = "Motorhand_FFB" }
+mujoco-viewer = { cmd = "python -m motorhand_teleop.mujoco_viewer", cwd = "Motorhand_FFB" }
+encos-test = { cmd = "python hardware/encos_dexhand/examples/test_12_motors.py" }
+encos-home = { cmd = "python -m motorhand_teleop.encos_home", cwd = "Motorhand_FFB" }
+encos-zero-all = { cmd = "python -m motorhand_teleop.encos_zero_step --all", cwd = "Motorhand_FFB" }
+encos-zero-step = { cmd = "python -m motorhand_teleop.encos_zero_step", cwd = "Motorhand_FFB" }
+encos-zero-thumb = { cmd = "python -m motorhand_teleop.encos_zero_step --finger thumb", cwd = "Motorhand_FFB" }
+encos-zero-index = { cmd = "python -m motorhand_teleop.encos_zero_step --finger index", cwd = "Motorhand_FFB" }
+encos-zero-middle = { cmd = "python -m motorhand_teleop.encos_zero_step --finger middle", cwd = "Motorhand_FFB" }
+encos-zero-ring = { cmd = "python -m motorhand_teleop.encos_zero_step --finger ring", cwd = "Motorhand_FFB" }
+encos-zero-pinky = { cmd = "python -m motorhand_teleop.encos_zero_step --finger pinky", cwd = "Motorhand_FFB" }
+gui = { cmd = "ENCOS_CALIBRATION_FILE=hardware/encos_dexhand/configs/ffb/joint_calibration.json python hardware/encos_dexhand/apps/gui_master.py" }
+encos-live-viewer = { cmd = "python -m motorhand_teleop.encos_live_viewer", cwd = "Motorhand_FFB" }
+glove-wuji-viewer = { cmd = "python -m motorhand_teleop.viewer --root . --mapping ../hardware/encos_dexhand/configs/sim/glove_mapping.json --pinch-d1 3 --pinch-d2 6 --pinch-weight 1", cwd = "Motorhand_FFB" }
+build-real-hand = { cmd = "cmake -S src/motorhand_teleop/real_hand/native -B .cache/native-real-hand/build -DREAL_HAND_BUILD_TESTS=ON && cmake --build .cache/native-real-hand/build --parallel", cwd = "Motorhand_FFB" }
+test-real-hand-native = { cmd = "ctest --test-dir .cache/native-real-hand/build --output-on-failure", cwd = "Motorhand_FFB" }
+build-control = { cmd = "cmake -S src/motorhand_teleop/real_hand/native_control -B .cache/native-control/build -DCMAKE_BUILD_TYPE=Release -DMOTORHAND_NATIVE_TESTS=ON && cmake --build .cache/native-control/build --parallel 4", cwd = "Motorhand_FFB", depends-on = ["build-real-hand"] }
+test-control-native = { cmd = "ctest --test-dir .cache/native-control/build --output-on-failure", cwd = "Motorhand_FFB", depends-on = ["build-control"] }
+real-hand = { cmd = "python -m motorhand_teleop.real_hand", cwd = "Motorhand_FFB" }
+wuji-teleop = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native teleop --execute", cwd = "Motorhand_FFB", depends-on = ["build-control"] }
+wuji-force-linear = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native force-linear --execute", cwd = "Motorhand_FFB", depends-on = ["build-control"] }
+force-ui = { cmd = "python -m motorhand_teleop.real_hand.force_curves", cwd = "Motorhand_FFB" }
+build-monitor = { cmd = "cmake -S src/motorhand_teleop/teleop_monitor/native -B .cache/teleop-monitor/build -DCMAKE_BUILD_TYPE=Release && cmake --build .cache/teleop-monitor/build --parallel 2", cwd = "Motorhand_FFB" }
+teleop-ui = { cmd = "python -m motorhand_teleop.teleop_monitor", cwd = "Motorhand_FFB", depends-on = ["build-monitor"] }
+plotjuggler = { cmd = "bash scripts/ros_plotjuggler.sh plot", cwd = "Motorhand_FFB" }
+plotjuggler-pinky = { cmd = "bash scripts/ros_plotjuggler.sh plot --nosplash --buffer_size 20 --layout config/plotjuggler-pinky-right.xml", cwd = "Motorhand_FFB" }
+plotjuggler-bridge = { cmd = "bash scripts/ros_plotjuggler.sh bridge", cwd = "Motorhand_FFB" }
+plotjuggler-demo = { cmd = "bash scripts/ros_plotjuggler.sh demo", cwd = "Motorhand_FFB" }
+wuji-force-contact = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native force-contact --execute", cwd = "Motorhand_FFB", depends-on = ["build-control"] }
+wuji-record = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native record --execute", cwd = "Motorhand_FFB", depends-on = ["build-control"] }
+wuji-replay = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native replay", cwd = "Motorhand_FFB", depends-on = ["build-control"] }
+wuji-takeover = { cmd = "RUST_LOG=warn .cache/native-control/build/motorhand_native takeover --execute", cwd = "Motorhand_FFB", depends-on = ["build-control"] }
+wuji-discover = { cmd = "python -m motorhand_teleop.real_hand discover", cwd = "Motorhand_FFB" }

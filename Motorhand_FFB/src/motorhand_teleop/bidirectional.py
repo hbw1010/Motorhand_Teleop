@@ -388,9 +388,10 @@ class GloveInverseSolver:
         motor_indices = np.flatnonzero(np.isfinite(self._motor_lower))
         constrained = bool(motor_indices.size)
         # 实测角是正规项锚点，不是强制的数值起点；执行器滞后不能让每帧从零重求。
-        numerical_start = (
-            np.zeros(12, dtype=np.float64) if constrained else start
-        ) if self._last_successful_positions is None else self._last_successful_positions
+        if self._last_successful_positions is None:
+            numerical_start = np.zeros(12, dtype=np.float64) if constrained else start
+        else:
+            numerical_start = self._last_successful_positions
         guess = np.clip(numerical_start, -self.joint_bound_rad, self.joint_bound_rad)
         target_points = target.points_m
         weight = np.sqrt(self.regularization_weight)

@@ -16,7 +16,7 @@ def validate_pose_mapping(project_root: str | Path) -> dict[str, object]:
     root = Path(project_root)
     reports: dict[str, object] = {}
     for hand in ("right", "left"):
-        source = Ve33LandmarkSource(hand, asset_root=root / "assets" / "hand_motor_ve33")
+        source = Ve33LandmarkSource(hand, asset_root=root.parent / "assets" / "hand_motor_ve33")
         retargeter = WujiHand2Retargeter.from_yaml(
             default_retarget_config(root, hand), hand=hand
         )

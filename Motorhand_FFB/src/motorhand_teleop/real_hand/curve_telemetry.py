@@ -11,7 +11,7 @@ import uuid
 from ..domain import GLOVE_JOINTS
 
 DEFAULT_CURVE_PORT = 8765
-_MAX_PAYLOAD_BYTES = 16_384
+_MAX_PAYLOAD_BYTES = 32_768
 
 
 def _number(value):

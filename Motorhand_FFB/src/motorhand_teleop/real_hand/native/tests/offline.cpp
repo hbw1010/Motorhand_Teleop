@@ -141,7 +141,7 @@ public:
 };
 RealHandOptions options(int hand = 1) {
     return {2, hand, "offline", "", "approved", "approved", 1.5, 8, 3, .12, .08,
-            200, .005, 1.5, .08, .04, 1.5, 3, .05, 20, 1};
+            200, .005, 1.5, .3, .04, 1.5, 3, .05, 20, 1};
 }
 struct Session {
     std::shared_ptr<Device> device;

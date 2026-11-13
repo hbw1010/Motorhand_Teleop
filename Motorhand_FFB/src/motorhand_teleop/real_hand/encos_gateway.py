@@ -1,6 +1,7 @@
 """驱动 2（Python 侧）：STM32G4 LQS-GW02 3-CAN 网关，经厂商 C++ SDK。
 
-厂商 SDK（``hardware/encos_g4_gateway_sdk/vendor``，未修改）是纯头文件 C++；
+厂商 SDK（``hardware/encos_g4_gateway_sdk/vendor``）是纯头文件 C++；
+原生收包时间扩展见该目录 ``LOCAL_CHANGES.md``，本模块的 C ABI 保持兼容。
 ``shim/g4_shim.cpp`` 把 ``lqs::HandClientG4`` 包成 C ABI，本模块首次使用时编译它，
 并提供 ``EncosGloveHardwareDriver`` 用到的 ``encos_hand.EncosHand`` 接口子集，
 可作为其 ``hand_factory``。实时 C++ 链路（native_control）不经过这里。
@@ -20,7 +21,7 @@ import threading
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3] / "hardware" / "encos_g4_gateway_sdk"
+ROOT = Path(__file__).resolve().parents[4] / "hardware" / "encos_g4_gateway_sdk"
 VENDOR_INCLUDE = ROOT / "vendor" / "include"
 SHIM_SOURCE = ROOT / "shim" / "g4_shim.cpp"
 LIBRARY = ROOT / "build" / "libg4_shim.so"

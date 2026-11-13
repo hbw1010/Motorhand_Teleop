@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(monitor_curve LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Qt5 REQUIRED COMPONENTS Core Gui)
+add_library(monitor_curve SHARED curve_path.cpp)
+target_link_libraries(monitor_curve PRIVATE Qt5::Core Qt5::Gui)

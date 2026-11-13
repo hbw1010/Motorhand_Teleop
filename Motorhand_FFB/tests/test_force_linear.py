@@ -262,7 +262,7 @@ def test_coordinate_rescaling_cancels_but_each_nominal_model_limit_remains_indep
 def test_real_cad_coordinate_boundary_and_complete_retarget_have_independent_fd_oracle(hand):
     config = replace(_config(), glove_hand=hand, gain=0.6)
     pipeline = GloveWujiRetargetPipeline.from_yaml(
-        hand, asset_root=ROOT / "assets" / "hand_motor_ve33",
+        hand, asset_root=ROOT.parent / "assets" / "hand_motor_ve33",
         config_path=default_retarget_config(ROOT, hand), estimate_jacobian=True)
     model = pipeline.landmarks.model
     glove, pose = model.evaluate_motor_state({name: 0.04 + i * 0.002 for i, name in enumerate(model.motor_names)})

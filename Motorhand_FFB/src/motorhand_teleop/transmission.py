@@ -20,8 +20,10 @@ class GloveTransmission:
             raise ValueError("joint_positions_rad必须是有限的12维数组")
         jacobian = np.empty((12, 12), dtype=np.float64)
         for index in range(12):
-            plus = q.copy(); plus[index] += self._step
-            minus = q.copy(); minus[index] -= self._step
+            plus = q.copy()
+            plus[index] += self._step
+            minus = q.copy()
+            minus[index] -= self._step
             motor_plus = np.asarray(self._solve(plus), dtype=np.float64)
             motor_minus = np.asarray(self._solve(minus), dtype=np.float64)
             if motor_plus.shape != (12,) or motor_minus.shape != (12,):
@@ -53,6 +55,12 @@ class GloveTransmission:
     def motor_torque_to_current(motor_torque_nm: np.ndarray, torque_constant_nm_a: np.ndarray) -> np.ndarray:
         torque = np.asarray(motor_torque_nm, dtype=np.float64)
         kt = np.asarray(torque_constant_nm_a, dtype=np.float64)
-        if torque.shape != (12,) or kt.shape != (12,) or np.any(kt <= 0) or not np.all(np.isfinite(torque)) or not np.all(np.isfinite(kt)):
+        if (
+            torque.shape != (12,)
+            or kt.shape != (12,)
+            or np.any(kt <= 0)
+            or not np.all(np.isfinite(torque))
+            or not np.all(np.isfinite(kt))
+        ):
             raise ValueError("电机力矩和力矩常数必须是12维正有限数组")
         return torque / kt

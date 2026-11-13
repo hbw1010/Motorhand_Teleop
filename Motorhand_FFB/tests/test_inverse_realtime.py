@@ -12,7 +12,7 @@ from motorhand_teleop.domain import GLOVE_JOINTS
 from motorhand_teleop.landmarks import Ve33LandmarkSource
 
 
-ASSET_ROOT = Path(__file__).resolve().parents[1] / "assets" / "hand_motor_ve33"
+ASSET_ROOT = Path(__file__).resolve().parents[1].parent / "assets" / "hand_motor_ve33"
 
 
 def _joints(values):

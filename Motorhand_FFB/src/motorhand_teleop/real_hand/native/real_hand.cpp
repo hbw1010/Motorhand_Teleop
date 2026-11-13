@@ -157,14 +157,25 @@ struct RealHand {
     }
     Feedback wait_cleared(uint64_t after) {
         const auto deadline = Clock::now() + std::chrono::duration<double>(options.enable_timeout);
+        // 2.13.1实机：清错RPC返回后1–2ms的新鲜Ready帧仍可早于设备完成清错，
+        // 此时立即enable会被部分关节忽略。连续观察100ms，再取窗口后的新鲜帧。
+        // 这是启动阶段的保守间隔，不是设备完成回执；使能后仍须逐轴确认。
+        constexpr uint64_t settle_ns = 100'000'000;
+        uint64_t healthy_since = 0;
         do {
+            require(!interrupt.load() && !terminate.load(), "清错等待被显式停止请求中断");
             auto f = sample(false, true);
             require(std::all_of(f.enabled.begin(), f.enabled.end(), [](uint8_t v) { return v == 0; }),
                     "清错过程中关节意外使能");
             bool cleared = true;
             for (size_t i = 0; i < 20; ++i)
                 cleared = cleared && (f.errors[i] == 0 || f.warnings[i]);
-            if (f.position_ns > after && f.diagnostics_ns > after && cleared) return f;
+            if (f.position_ns > after && f.diagnostics_ns > after && cleared) {
+                if (!healthy_since) healthy_since = monotonic_ns();
+                if (std::min(f.position_ns, f.diagnostics_ns) >= healthy_since + settle_ns) return f;
+            } else {
+                healthy_since = 0;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         } while (Clock::now() < deadline);
         throw std::runtime_error("未从清错后的新鲜位置及诊断确认全部关节失能且无停机故障或未知错误码");

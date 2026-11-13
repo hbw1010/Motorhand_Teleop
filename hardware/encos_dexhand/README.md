@@ -38,8 +38,11 @@ pose = glove.read_pose()  # 新鲜GlovePose：真实指节rad，不是SDK原始�
 电机 ID 到模型电机轴的绑定、原始角零位／方向及软限位配置在：
 
 ```text
-configs/glove_mapping.json
+configs/sim/glove_mapping.json
+configs/ffb/glove_mapping.json
 ```
+
+两套标定分别供外层仿真和 FFB 使用，不可未经设备核对互换。各目录中的 `joint_calibration.json` 属于对应标定。
 
 当前已确认的电机 ID 顺序为：
 

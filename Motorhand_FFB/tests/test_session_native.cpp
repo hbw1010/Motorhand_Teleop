@@ -55,6 +55,8 @@ struct Sim {
     bool force_enabled=false, manual=false, frozen=false, loaded=false, stale_hand=false;
     bool fail_hand_send=false, fail_glove_send=false;
     int hand_disable=0, glove_disable=0, hand_close=0, glove_close=0, expired_attempts=0;
+    int hand_homes=0; bool fail_hand_home=false;
+    int loaded_joint=-1; double hand_limit=3.0;
     std::vector<HandWrite> hand_writes;
     std::vector<GloveWrite> glove_writes;
     void reset(const Vec20& initial) {
@@ -63,6 +65,8 @@ struct Sim {
         hand_frame={}; glove_frame={}; hand_enabled=glove_connected=hand_connected=glove_homed=false;
         force_enabled=manual=frozen=loaded=stale_hand=fail_hand_send=fail_glove_send=false;
         hand_disable=glove_disable=hand_close=glove_close=expired_attempts=0;
+        hand_homes=0; fail_hand_home=false;
+        loaded_joint=-1; hand_limit=3.0;
         hand_writes.clear(); glove_writes.clear();
     }
     void start() {
@@ -85,8 +89,8 @@ struct Sim {
                     for (int i=0; i<20; ++i) {
                         hand_frame.positions[i]=hand_position[i];
                         hand_frame.velocities_rad_s[i]=0;
-                        hand_frame.effort_a[i]=loaded ? 1.0 : 0.0;
-                        hand_frame.lower_limits[i]=-3.0; hand_frame.upper_limits[i]=3.0;
+                        hand_frame.effort_a[i]=loaded && (loaded_joint<0 || loaded_joint==i) ? 1.0 : 0.0;
+                        hand_frame.lower_limits[i]=-hand_limit; hand_frame.upper_limits[i]=hand_limit;
                         hand_frame.online[i]=1; hand_frame.enabled[i]=hand_enabled ? 1 : 0;
                     }
                     hand_frame.has_velocity=hand_frame.has_effort=1;
@@ -115,6 +119,16 @@ void WujiDevice::connect() { std::lock_guard<std::mutex> l(sim.mutex); sim.hand_
 RealHandState WujiDevice::read() { std::lock_guard<std::mutex> l(sim.mutex); return sim.hand_frame; }
 void WujiDevice::enable() {
     { std::lock_guard<std::mutex> l(sim.mutex); sim.hand_enabled=true; }
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+}
+void WujiDevice::home(const std::atomic<bool>* stop_requested) {
+    if (stop_requested && stop_requested->load()) throw std::runtime_error("cancelled home");
+    { std::lock_guard<std::mutex> l(sim.mutex);
+      check(sim.glove_homed && sim.hand_enabled,"Wuji回零必须在手套回零和Wuji使能后");
+      ++sim.hand_homes;
+      if(sim.fail_hand_home)throw std::runtime_error("injected Wuji home failure");
+      sim.hand_target.fill(0);sim.hand_position.fill(0);
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(25));
 }
 void WujiDevice::send(const Vec20& q, std::uint64_t deadline) {
@@ -171,6 +185,13 @@ static Vec12 submit_glove(Vec12 value, std::uint64_t deadline, bool force_mode) 
 }
 Vec12 EncosDriver::write_position(const Vec12& value, std::uint64_t deadline) { return submit_glove(value,deadline,false); }
 Vec12 EncosDriver::write_torque(const Vec12& value, std::uint64_t deadline) { return submit_glove(value,deadline,true); }
+DriverImpedanceSubmission EncosDriver::write_impedance(const DriverImpedanceCommand& c,std::uint64_t deadline) {
+    DriverImpedanceSubmission r;r.command=c;
+    {std::lock_guard<std::mutex> l(sim.mutex);for(int i=0;i<12;++i){
+        r.pd_nm[i]=c.kp[i]*(c.target_rad[i]-sim.motors[i])-c.kd[i]*c.velocity_rad_s[i];
+        r.friction_nm[i]=c.blocked_direction[i]?0:c.feedforward_nm[i];r.nominal_nm[i]=r.pd_nm[i]+c.feedforward_nm[i];}}
+    r.nominal_nm=submit_glove(r.nominal_nm,deadline,true);return r;
+}
 void EncosDriver::disable() { std::lock_guard<std::mutex> l(sim.mutex); ++sim.glove_disable; sim.force_enabled=false; }
 void EncosDriver::close() { std::lock_guard<std::mutex> l(sim.mutex); ++sim.glove_close; sim.glove_connected=false; }
 }
@@ -185,19 +206,19 @@ struct Fixture {
         mapping=dir/"mapping.json"; linear=dir/"linear.json"; contact=dir/"contact.json"; recording=dir/"trajectory.jsonl";
         json map{{"calibrated",true}, {"id_order_confirmed",true}, {"direction_confirmed",true}};
         std::ofstream(mapping)<<map.dump();
-        json l; { std::ifstream f(root/"config/feedback/max-torque-linear-right.json"); f>>l; }
+        json l; { std::ifstream f(root.parent_path()/"config/feedback/max-torque-linear-right.json"); f>>l; }
         l["wuji_serial_number"]=serial; l["source_id"]="offline-only-synthetic-limits";
         // A long local-Jacobian age isolates the asynchronous algorithm from
         // host scheduling; input frames and every command remain capped at 100ms.
         l["jacobian_max_age_s"]=5.0; l["jacobian_max_pose_delta_rad"]=1.0;
         l["ramp_duration_s"]=0.1; l["max_torque_slew_nm_s"]=std::vector<double>(12,100.0);
         std::ofstream(linear)<<l.dump();
-        json c; { std::ifstream f(root/"config/feedback/contact-impedance-right.json"); f>>c; }
+        json c; { std::ifstream f(root.parent_path()/"config/feedback/contact-impedance-right.json"); f>>c; }
         c["source_id"]="offline-only-synthetic-contact";
         c["error_on_rad"]=std::vector<double>(20,0.005); c["error_off_rad"]=std::vector<double>(20,0.002);
         c["dwell_s"]=0.02; c["release_dwell_s"]=0.04;
         std::ofstream(contact)<<c.dump();
-        options.asset_root=root/"assets/hand_motor_ve33";
+        options.asset_root=root.parent_path()/"assets/hand_motor_ve33";
         options.retarget_yaml=root/"config/retargeting/official/right.yaml";
         options.glove_mapping=mapping; options.linear_feedback=linear; options.contact_feedback=contact;
         options.wuji_serial=serial; options.approved_firmware=firmware; options.transition_ns=200000000;
@@ -395,10 +416,85 @@ void grasp_handover(const Fixture& f) {
     session.stop(); sim.stop(); no_expired_commands();
 }
 
+void zero_aligned_start(const Fixture& f) {
+    sim.reset(f.bent);sim.start();
+    auto options=f.options;options.zero_aligned_start=true;
+    Session session(options);session.connect();session.enable();
+    check(sim.hand_homes==1,"独立遥操必须显式回零Wuji一次");
+    check(distance(session.read_wuji_state().position_rad,Vec20{})<1e-9,"开始跟随前Wuji必须回到自身零位");
+    {std::lock_guard<std::mutex> l(sim.mutex);sim.manual=true;sim.manual_motors.fill(0);}
+    session.request_takeover(true);
+    SessionTick last{};auto next=Clock::now();
+    auto run=[&](int frames){for(int i=0;i<frames;++i){last=session.step_takeover();next+=std::chrono::milliseconds(20);std::this_thread::sleep_until(next);}};
+    run(25);
+    check(distance(last.wuji_target,Vec20{})<.002,"手套零位必须保持Wuji零目标，不保留启动姿态");
+    {std::lock_guard<std::mutex> l(sim.mutex);sim.manual_motors[4]=.18;sim.manual_motors[5]=.18;}
+    run(25);
+    check(distance(last.wuji_target,Vec20{})>.01,"手套运动必须产生非零跟随目标");
+    {std::lock_guard<std::mutex> l(sim.mutex);sim.manual_motors.fill(0);}
+    run(35);
+    check(distance(last.wuji_target,Vec20{})<.005,"回到手套零位后不应产生随历史运动衰减的姿态偏置");
+    check(sim.hand_homes==1,"正常跟随不能重复回零");
+    session.stop();sim.stop();no_expired_commands();
+
+    sim.reset(f.bent);sim.start();sim.fail_hand_home=true;
+    Session failed(options);failed.connect();
+    must_throw([&]{failed.enable();},"Wuji回零失败必须中止启动");
+    check(sim.hand_writes.empty() && sim.hand_disable>0 && sim.glove_disable>0,
+          "回零失败后不得进入跟随并须停止两侧输出");
+    failed.stop();sim.stop();
+}
+void zero_aligned_saturation(const Fixture& f) {
+    sim.reset(Vec20{});
+    sim.hand_limit=.04;sim.start();
+    auto options=f.options;options.zero_aligned_start=true;options.linear_force_feedback=true;
+    Session session(options);session.connect();session.enable();
+    {std::lock_guard<std::mutex> l(sim.mutex);sim.manual=true;sim.manual_motors.fill(0);}
+    session.request_takeover(true);
+    auto next=Clock::now();SessionTick last{};
+    auto run=[&](int frames){for(int i=0;i<frames;++i){last=session.step_takeover();next+=std::chrono::milliseconds(20);std::this_thread::sleep_until(next);}};
+    run(20);
+    {std::lock_guard<std::mutex> l(sim.mutex);sim.manual_motors[4]=.3;sim.manual_motors[5]=.3;}
+    run(35);
+    int saturated=-1;
+    for(int i=0;i<20;++i){check(std::abs(last.wuji_target[i])<=.040001,"零位偏移后仍须保持实际限位");
+        if(std::abs(last.wuji_target[i])>=.03999)saturated=i;}
+    check(saturated>=0,"测试必须实际触发平移后的目标限位");
+    {std::lock_guard<std::mutex> l(sim.mutex);sim.loaded=true;sim.loaded_joint=saturated;}
+    run(35);
+    check(last.force_commanded && last.force_geometry_valid,"饱和测试必须得到有效力反馈计算");
+    check(max_abs(last.glove_target)<.003,"仅饱和轴有电流时，截断行Jacobian不能产生手套反射力矩");
+    session.stop();sim.stop();no_expired_commands();
+}
+
+void driver_impedance_session(const Fixture& f) {
+    sim.reset(Vec20{});sim.start();auto options=f.options;options.zero_aligned_start=true;
+    options.driver_impedance_feedback=true;options.driver_impedance_config=f.root.parent_path()/"config/feedback/wuji-driver-impedance-right.json";
+    Session session(options);session.connect();session.enable();session.request_takeover(true);
+    {std::lock_guard<std::mutex> l(sim.mutex);sim.manual=true;sim.frozen=true;sim.loaded=true;}
+    bool seen_pd=false,seen_friction=false;auto next=Clock::now();
+    for(int n=0;n<150;++n){
+        {std::lock_guard<std::mutex> l(sim.mutex);sim.manual_motors[4]=std::min(.18,n*.003);sim.manual_motors[5]=std::min(.18,n*.003);}
+        auto tick=session.step_takeover();
+        if(tick.force_commanded){check(tick.driver_impedance,"Session必须保留驱动阻抗模式");
+            check(tick.feedback_request_id&&tick.contact_evaluated_ns&&tick.impedance_planned_ns>=tick.contact_evaluated_ns&&
+                  tick.glove_submit_ns>=tick.impedance_planned_ns,"Session必须将同一完成请求的判据/规划/SDK提交时刻带出");
+            check(std::min(tick.feedback_input_hand.received_ns,*std::min_element(tick.glove_impedance_observation.source_ns.begin(),tick.glove_impedance_observation.source_ns.end()))==
+                  tick.glove_output_source_ns,"Session代理源时刻必须匹配完成请求，不能借用当前UI帧");
+            seen_pd|=max_abs(tick.glove_driver_kp)>0;seen_friction|=max_abs(tick.glove_friction_nm)>.005;
+            if(max_abs(tick.glove_driver_kp)>0)for(int i=0;i<12;++i)if(tick.glove_driver_kp[i]>0)
+                check(tick.glove_friction_nm[i]==0,"接触PD不能叠加摩擦");}
+        if(seen_pd&&seen_friction)break;
+        next+=std::chrono::milliseconds(20);std::this_thread::sleep_until(next);
+    }
+    check(seen_pd&&seen_friction,"真实Session/Jacobian/接触判据必须同时接通自由摩擦和接触驱动PD");
+    session.stop();sim.stop();no_expired_commands();
+}
+
 int main(int argc, char** argv) {
     try {
         auto root=argc>1 ? std::filesystem::absolute(argv[1]) : std::filesystem::current_path();
-        Fixture f(root); replay_takeover_and_resume(f); grasp_handover(f); fault_case(f,true); fault_case(f,false); asynchronous_glove_fault(f); linear_feedback(f);
+        Fixture f(root); driver_impedance_session(f); zero_aligned_start(f); zero_aligned_saturation(f); replay_takeover_and_resume(f); grasp_handover(f); fault_case(f,true); fault_case(f,false); asynchronous_glove_fault(f); linear_feedback(f);
         std::cout<<"Offline native Session integration passed\n"; return 0;
     } catch (const std::exception& e) {
         sim.stop(); std::cerr<<"Offline native Session integration failed: "<<e.what()<<'\n'; return 1;

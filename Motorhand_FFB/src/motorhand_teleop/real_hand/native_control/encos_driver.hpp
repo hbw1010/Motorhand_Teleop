@@ -53,6 +53,9 @@ public:
     void enable_force();
     Vec12 write_position(const Vec12& motor_rad, std::uint64_t deadline_ns);
     Vec12 write_torque(const Vec12& nominal_nm, std::uint64_t deadline_ns);
+    // 量化后按当前反馈位置/输入估算速度检查总PD预算及撤离方向。
+    // MIT没有硬力矩限额；返回值不是实测力矩，后续姿态变化会改变PD。
+    DriverImpedanceSubmission write_impedance(const DriverImpedanceCommand&, std::uint64_t deadline_ns);
     // If output was acquired, disable verifies all 12 zero-current serial
     // submissions within 100 ms; failure is reported and output stays latched.
     // Serial submission is not motor acknowledgement or measured torque.

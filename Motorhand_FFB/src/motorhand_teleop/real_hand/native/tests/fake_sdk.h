@@ -32,6 +32,9 @@ struct Scenario {
     std::atomic<bool> emergency_keeps_enabled{true}, emergency_failure{false}, disable_failure{false};
     std::atomic<bool> clear_failure{false}, sticky_fault{false}, enable_fault{false};
     std::atomic<int> clears{0};
+    // 模拟异步清错尚未完成但仍在上报新鲜Ready帧的设备。
+    std::atomic<int> clear_busy_ms{0}, ignored_enables{0};
+    std::atomic<uint64_t> clear_ready_ns{0};
     std::atomic<int> effort_writes{0}, mit_writes{0};
 };
 void enqueue(const std::shared_ptr<Scenario> &scenario);

@@ -113,7 +113,7 @@ def _combined_model(
     mount_quat_wxyz: np.ndarray,
 ) -> mujoco.MjModel:
     hand_spec = mujoco.MjSpec.from_file(str(root / _HAND_MJCF))
-    glove_spec = mujoco.MjSpec.from_file(str(root / _GLOVE_MJCF))
+    glove_spec = mujoco.MjSpec.from_file(str(root.parent / _GLOVE_MJCF))
     mount = hand_spec.worldbody.add_frame()
     mount.name = "glove_visual_mount"
     mount.pos = np.asarray(mount_pos, dtype=np.float64).tolist()
@@ -173,11 +173,11 @@ def run_viewer(project_root: str | Path) -> None:
     root = Path(project_root)
     pipeline = GloveWujiRetargetPipeline.from_yaml(
         "right",
-        asset_root=root / "assets" / "hand_motor_ve33",
+        asset_root=root.parent / "assets" / "hand_motor_ve33",
         config_path=default_retarget_config(root, "right"),
         estimate_jacobian=True,
     )
-    glove_model = Ve33GloveModel("right", asset_root=root / "assets" / "hand_motor_ve33")
+    glove_model = Ve33GloveModel("right", asset_root=root.parent / "assets" / "hand_motor_ve33")
     if tuple(pipeline.retargeter.output_joint_names) != _HAND_JOINTS:
         raise RuntimeError("可视化模型关节顺序与官方重定向输出不一致")
     zero = {name: 0.0 for name in GLOVE_JOINTS}

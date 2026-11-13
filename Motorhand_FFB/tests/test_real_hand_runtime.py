@@ -788,7 +788,7 @@ def _complex_readonly_pair(bridge):
     physical_limits = retargeter._core.optimizer.robot.joint_limits[retargeter._output_indices]
     hand = HandPlant(clock, target, physical_limits)
     glove = MotorPlant(clock, source.model, actual_joints)
-    mapping = json.loads((ROOT / "hardware/encos_dexhand/configs/glove_mapping.json").read_text())
+    mapping = json.loads((ROOT.parent / "hardware/encos_dexhand/configs/ffb/glove_mapping.json").read_text())
     for config in mapping["motors"].values():
         motor = source.model.joint_motor_names[config["joint"]]
         limits = [
@@ -1122,7 +1122,7 @@ def test_inference_takeover_uses_same_solver_and_force_role_without_pose_jump(fo
 
         controller.close()
         config = replace(
-            MaxTorqueLinearConfig.from_json(ROOT / "config/feedback/max-torque-linear-right.json"),
+            MaxTorqueLinearConfig.from_json(ROOT.parent / "config/feedback/max-torque-linear-right.json"),
             wuji_serial_number="explicit-test-SN", ramp_duration_s=0.1,
             jacobian_max_age_s=10.0, jacobian_refresh_interval_s=100.0,
         )
@@ -1158,7 +1158,7 @@ def test_inference_takeover_uses_same_solver_and_force_role_without_pose_jump(fo
         if linear_mode:
             assert np.linalg.norm(loaded.force_feedback.model_torque_nm) > 1e-7
             assert loaded.force_feedback.wuji_actuator_torque_nm is None
-            np.testing.assert_allclose(loaded.force_feedback.wuji_load_fraction, hand.effort / 2.0)
+            np.testing.assert_allclose(loaded.force_feedback.wuji_load_fraction, hand.effort / config.wuji_max_current_a)
         else:
             assert np.linalg.norm(loaded.force_feedback.model_current_a) > 1e-7
             np.testing.assert_allclose(loaded.force_feedback.wuji_actuator_torque_nm, -0.2 * hand.effort)
@@ -1178,7 +1178,7 @@ def test_maximum_linear_takeover_works_without_kt_and_preserves_single_position_
     from motorhand_teleop.real_hand.force_linear import MaxTorqueLinearConfig
 
     config = replace(
-        MaxTorqueLinearConfig.from_json(ROOT / "config/feedback/max-torque-linear-right.json"),
+        MaxTorqueLinearConfig.from_json(ROOT.parent / "config/feedback/max-torque-linear-right.json"),
         wuji_serial_number="explicit-test-SN", ramp_duration_s=0.1,
         jacobian_max_age_s=10.0, jacobian_refresh_interval_s=100.0,
     )
@@ -1211,7 +1211,7 @@ def test_maximum_linear_takeover_works_without_kt_and_preserves_single_position_
         feedback = loaded.force_feedback
         assert feedback.mapping_mode == "max_torque_linear_estimate"
         assert feedback.wuji_actuator_torque_nm is None and feedback.glove_joint_torque_nm is None
-        np.testing.assert_allclose(feedback.wuji_load_fraction, hand.effort / 2.0)
+        np.testing.assert_allclose(feedback.wuji_load_fraction, hand.effort / config.wuji_max_current_a)
         assert np.linalg.norm(feedback.model_torque_nm) > 1e-7
         caps = np.array([glove.model_force_torque_limits_nm[name] for name in glove.motor_names])
         assert np.all(np.abs(feedback.model_torque_nm) <= caps)

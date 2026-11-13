@@ -2,6 +2,7 @@
 
 #include "encos_driver.hpp"
 #include "force_controller.hpp"
+#include "driver_impedance.hpp"
 #include "glove_output.hpp"
 #include "inverse_worker.hpp"
 #include "jacobian_worker.hpp"
@@ -74,12 +75,14 @@ struct Session::Impl {
     std::unique_ptr<InverseWorker> inverse;
     std::unique_ptr<JacobianWorker> jacobian;
     std::unique_ptr<ForceController> force;
+    std::unique_ptr<DriverImpedancePlanner> impedance;
     std::unique_ptr<GloveOutputWorker> output_worker;
     std::optional<GlovePose> last_pose;
     std::optional<InverseWorkerResult> inverse_result;
     std::optional<JacobianSnapshot> jacobian_result;
     Vec20 lower{}, upper{}, last_hand_target{}, hand_anchor{};
     Vec20 takeover_offset{}, takeover_last_raw{};
+    Vec20 zero_reference{};
     bool takeover_has_raw = false;
     std::uint64_t takeover_offset_clock = 0;
     Vec12 glove_anchor{};
@@ -95,6 +98,12 @@ struct Session::Impl {
     explicit Impl(SessionOptions o) : options(std::move(o)) {
         if (options.force_feedback && !options.glove_output)
             throw std::invalid_argument("force feedback requires glove output");
+        if (options.zero_aligned_start && !options.glove_output)
+            throw std::invalid_argument("zero-aligned start requires glove output for homing");
+        if (options.driver_impedance_feedback && (!options.force_feedback || options.linear_force_feedback))
+            throw std::invalid_argument("driver impedance requires contact feedback");
+        if (!std::isfinite(options.feedback_hardness) || options.feedback_hardness<0 || options.feedback_hardness>1)
+            throw std::invalid_argument("feedback hardness must be in [0,1]");
         if (!options.transition_ns) throw std::invalid_argument("transition duration must be positive");
     }
     std::string cleanup() noexcept {
@@ -244,9 +253,17 @@ const WujiIdentity& Session::connect() {
         }
         s.model = std::make_unique<Ve33Model>(s.options.asset_root, s.options.left);
         s.retarget = std::make_unique<WujiRetarget>(s.options.retarget_yaml, s.options.left);
+        if (s.options.zero_aligned_start) {
+            // 在无输出时收敛模型零位的优化器先验；不能把任意启动姿态作为零位。
+            const auto zero = s.model->zero();
+            for (int i = 0; i < 30; ++i) s.zero_reference = s.retarget->solve(zero.points_m);
+        }
         if (s.options.force_feedback) {
             s.force = std::make_unique<ForceController>(s.options.contact_feedback.string(), s.options.linear_feedback.string(), signs, scales, raw_to_model, s.options.linear_force_feedback);
             s.force->set_motor_limits(lo, hi);
+            if (s.options.driver_impedance_feedback)
+                s.impedance = std::make_unique<DriverImpedancePlanner>(
+                    load_driver_impedance_config(s.options.driver_impedance_config.string()),s.options.feedback_hardness,cal);
         }
         s.hand = std::make_unique<WujiDevice>(s.identity, s.options.approved_firmware);
         s.hand->connect();
@@ -286,10 +303,15 @@ void Session::enable() {
     if (!s.connected || s.enabled || s.closed || s.fault || s.trajectory_rejected)
         throw std::runtime_error("session cannot enable in current state");
     try {
+        if (s.options.stop_requested && s.options.stop_requested->load())
+            throw std::runtime_error("启动已取消");
         if (s.options.glove_output) { s.glove_output_started = true; s.glove->home(); }
+        if (s.options.stop_requested && s.options.stop_requested->load())
+            throw std::runtime_error("启动已取消");
         if (s.options.glove_output)
-            s.output_worker = std::make_unique<GloveOutputWorker>(*s.glove, s.force.get());
+            s.output_worker = std::make_unique<GloveOutputWorker>(*s.glove, s.force.get(), s.impedance.get());
         s.hand_output_started = true; s.hand->enable();
+        if (s.options.zero_aligned_start) s.hand->home(s.options.stop_requested);
         const auto h = s.read_hand(true); const auto g = s.read_glove();
         s.pose_for(g);
         s.last_hand_target = h.position_rad; s.has_hand_target = false;
@@ -398,7 +420,7 @@ SessionTick Session::step_takeover() {
             s.transition_clock = now_ns();
             // The forward solver was idle during inference: start it (warm start and
             // norm_delta prior) at the command being handed over, not a stale pose.
-            s.retarget->seed(s.hand_anchor);
+            s.retarget->seed(s.options.zero_aligned_start ? s.zero_reference : s.hand_anchor);
             s.takeover_has_raw = false;
         }
         if (s.jacobian) {
@@ -408,8 +430,19 @@ SessionTick Session::step_takeover() {
             }
         }
         Vec20 target = s.retarget->solve(pose.points_m);
-        s.check_target(target);
-        if (s.options.takeover_offset_motion_rad > 0) {
+        if (!s.options.zero_aligned_start) s.check_target(target);
+        std::array<bool, 20> saturated{};
+        double zero_blend = 1.0;
+        if (s.options.zero_aligned_start) {
+            // 固定参考只减去零手套的重定向姿态；不随累计运动衰减，回零可重复。
+            for (int i = 0; i < 20; ++i) {
+                target[i] -= s.zero_reference[i];
+                saturated[i] = target[i] <= s.lower[i] || target[i] >= s.upper[i];
+                target[i] = std::clamp(target[i], s.lower[i], s.upper[i]);
+            }
+            zero_blend = s.hand_blend(now_ns(), true);
+            target = blend(s.hand_anchor, target, zero_blend);
+        } else if (s.options.takeover_offset_motion_rad > 0) {
             const auto now = now_ns();
             if (!s.takeover_has_raw) {
                 for (int i = 0; i < 20; ++i) s.takeover_offset[i] = s.hand_anchor[i] - target[i];
@@ -441,7 +474,13 @@ SessionTick Session::step_takeover() {
         s.last_hand_target = target; s.has_hand_target = true;
         if (s.force) {
             require_deadline(until);
-            s.output_worker->submit_force(target, h, g, pose, s.jacobian_result, until);
+            auto effective_jacobian = s.jacobian_result;
+            if (s.options.zero_aligned_start && effective_jacobian) {
+                for (int row = 0; row < 20; ++row)
+                    for (int col = 0; col < 12; ++col)
+                        effective_jacobian->jacobian[row * 12 + col] *= saturated[row] ? 0.0 : zero_blend;
+            }
+            s.output_worker->submit_force(target, h, g, pose, effective_jacobian, until);
         }
         const bool computed = completed && completed->force_computed;
         const ForceResult feedback = computed ? completed->force : ForceResult{};
@@ -451,6 +490,34 @@ SessionTick Session::step_takeover() {
         tick.glove_pose = pose; tick.virtual_hand_nm = feedback.virtual_hand_nm; tick.contact = feedback.contact;
         tick.linear_force = s.options.linear_force_feedback;
         tick.wuji_load_fraction = feedback.wuji_load_fraction;
+        tick.glove_projected_nm = feedback.projected_motor_nm;
+        tick.glove_requested_nm = feedback.model_motor_nm;
+        tick.driver_impedance = s.options.driver_impedance_feedback;
+        if (completed) {
+            tick.feedback_input_hand = completed->feedback_input_hand;
+            tick.feedback_input_target = completed->feedback_input_target;
+            tick.feedback_request_id = completed->request_id;
+            tick.contact_evaluated_ns = completed->contact_evaluated_ns;
+            tick.impedance_planned_ns = completed->impedance_planned_ns;
+            tick.glove_feedforward_nm = completed->driver_impedance ?
+                completed->impedance.command.feedforward_nm : completed->applied;
+        }
+        tick.feedback_hardness = s.options.feedback_hardness;
+        if (completed && completed->driver_impedance) {
+            tick.glove_impedance_observation = completed->impedance_observation;
+            tick.glove_friction_nm = completed->impedance.friction_nm;
+            tick.glove_driver_pd_nm = completed->impedance.pd_nm;
+            tick.glove_driver_target_rad = completed->impedance.command.target_rad;
+            tick.glove_driver_kp = completed->impedance.command.kp;
+            tick.glove_driver_kd = completed->impedance.command.kd;
+            tick.glove_driver_estimate_received_ns = completed->impedance.estimate_received_ns;
+            tick.glove_driver_velocity_received_ns = completed->impedance.command.velocity_received_ns;
+        }
+        tick.filtered_current_a = feedback.filtered_current_a;
+        tick.contact_reflection_gain = feedback.reflection_gain;
+        tick.hand_to_motor = feedback.hand_to_motor;
+        tick.wuji_projection_current_a = feedback.projection_current_a;
+        tick.wuji_projection_received_ns = feedback.projection_received_ns;
         tick.contact_phase = completed ? (computed ? feedback.phase : ContactPhase::waiting_geometry) :
                                          ContactPhase::not_configured;
         tick.force_commanded = completed.has_value();

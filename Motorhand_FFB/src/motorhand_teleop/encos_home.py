@@ -19,10 +19,11 @@ from encos_hand import EncosHand
 MOTOR_IDS = tuple(range(1, 13))
 HOME_CURRENT_RULE = {1: 1.5, **{motor_id: 1.0 for motor_id in range(2, 13)}}
 _DEFAULT_MAPPING = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[3]
     / "hardware"
     / "encos_dexhand"
     / "configs"
+    / "ffb"
     / "glove_mapping.json"
 )
 

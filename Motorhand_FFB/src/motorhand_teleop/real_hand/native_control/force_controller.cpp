@@ -248,6 +248,10 @@ ForceResult ForceController::step(const Vec20& target, const HandFrame& hand, co
     }
     Eigen::Matrix<double,12,1> projected = Eigen::Matrix<double,12,1>::Zero();
     if (geometry_valid) {
+        const Eigen::Matrix<double,12,20,Eigen::RowMajor> projection = lu.solve(mapping.transpose());
+        std::copy_n(projection.data(), 240, result.hand_to_motor.begin());
+        result.projection_current_a = hand.effort_a;
+        result.projection_received_ns = hand.received_ns;
         if (linear_mode_) {
             const auto linear = project_max_torque_linear(
                 jac, pose.motor_jacobian, hand.effort_a, linear_parameters_, max_torque_);
@@ -268,6 +272,7 @@ ForceResult ForceController::step(const Vec20& target, const HandFrame& hand, co
     const double history_dt = static_cast<double>(now - history_ns_) * 1e-9;
     for (int i = 0; i < 12; ++i) {
         double wanted = std::clamp(projected[i] * ramp, -max_torque_[i], max_torque_[i]);
+        result.projected_motor_nm[i] = projected[i];
         if (linear_mode_) {
             if (geometry_valid) wanted = std::clamp(wanted, history_[i] - max_slew_[i] * history_dt,
                                                      history_[i] + max_slew_[i] * history_dt);
@@ -277,6 +282,13 @@ ForceResult ForceController::step(const Vec20& target, const HandFrame& hand, co
         result.model_motor_nm[i] = wanted;
     }
     result.virtual_hand_nm = output_; result.contact = active_; result.active = geometry_valid; result.linear = linear_mode_;
+    if (!linear_mode_) for (int i=0;i<20;++i) {
+        result.contact_direction[i] = direction_[i];
+        result.impedance_contact[i] = geometry_valid && active_[i] && !release_set_[i] &&
+                                      direction_[i]*output_[i] < 0;
+    }
+    result.filtered_current_a = filtered_current_;
+    result.reflection_gain = gain_ * reflection_gain_;
     if (linear_mode_) {
         result.phase = ContactPhase::not_configured;
     } else if (!geometry_valid) {

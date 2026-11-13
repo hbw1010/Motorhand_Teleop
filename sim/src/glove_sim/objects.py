@@ -87,8 +87,6 @@ def _box_mesh(size: float, n: int = 3) -> tuple[list[tuple[float, float, float]]
                         i, j, k = a + da, b + db, fixed
                     quad.append(vid(i, j, k))
                 # Outward winding for the two faces of each axis.
-                if (face in ("x0", "y0", "z0")) == (axis in "xyz"):
-                    pass
                 if face in ("x0", "y1", "z0"):
                     faces.append((quad[0], quad[2], quad[1]))
                     faces.append((quad[0], quad[3], quad[2]))

@@ -24,7 +24,7 @@
 #include <unistd.h>
 #include <nlohmann/json.hpp>
 
-// 驱动 2: STM32G4 LQS-GW02 3-CAN gateway, vendor SDK used unmodified.
+// 驱动 2: STM32G4 LQS-GW02；SDK最小扩展只增加原始主机位置收包时间快照接口。
 #include "HandClientG4.hpp"
 
 namespace motorhand::native {
@@ -165,7 +165,7 @@ int open_port(const std::string& path) {
 
 struct EncosDriver::Impl {
     struct Motor { int index{}; double zero{}, sign{}, scale{}, factor{}, min{}, max{}; };
-    struct Feedback { double angle{}, current{}; std::uint64_t stamp{}; int error{}; };
+    struct Feedback { double angle{}, current{}; std::uint64_t stamp{}, current_stamp{}; int error{}; };
     struct Command {
         std::array<unsigned char, 8> data{};
         std::uint64_t deadline{};
@@ -321,7 +321,7 @@ struct EncosDriver::Impl {
         auto now = now_ns();
         for (int i = 0; i < 12; ++i) {
             const auto& f = feedback[i]; const auto& m = motors[i];
-            if (!f.stamp || f.stamp > now || now - f.stamp > feedback_age || f.error || !std::isfinite(f.angle) || !std::isfinite(f.current))
+            if (!f.stamp || f.stamp > now || now - f.stamp > feedback_age || f.error || !std::isfinite(f.angle))
                 throw std::runtime_error("Encos motor " + std::to_string(i+1) + " stale, missing, invalid or faulted: " +
                     (f.error ? "error code " + std::to_string(f.error)
                      : !f.stamp ? std::string("never answered")
@@ -330,7 +330,9 @@ struct EncosDriver::Impl {
                      : std::string("a non-finite reading")));
             out.raw_degrees[m.index] = f.angle;
             out.motor_rad[m.index] = (f.angle - m.zero) * m.factor * pi / 180.0;
-            out.measured_current_a[m.index] = f.current;
+            // 手套电流只用于显示；缺失不伪造采样时刻，也不阻断仅依赖位置的控制。
+            out.measured_current_a[m.index] = std::isfinite(f.current) ? f.current : 0;
+            out.current_received_ns[m.index] = std::isfinite(f.current) ? f.current_stamp : 0;
             out.received_ns[m.index] = f.stamp;
             out.oldest_ns = std::min(out.oldest_ns, f.stamp);
         }
@@ -359,7 +361,7 @@ struct EncosDriver::Impl {
             if (scan || f.id < 1 || f.id > 12 || f.size != 8 || std::find(ch.ids.begin(), ch.ids.end(), int(f.id)) == ch.ids.end()) continue;
             int i = f.id - 1;
             if (ch.has_sent[i] && f.data == ch.sent[i]) continue;
-            int type = f.data[0] >> 5; Feedback fb; fb.error = f.data[0] & 31; fb.stamp = stamp;
+            int type = f.data[0] >> 5; Feedback fb; fb.error = f.data[0] & 31; fb.stamp = fb.current_stamp = stamp;
             if (type == 2) {
                 std::uint32_t bits = (std::uint32_t(f.data[1]) << 24) | (std::uint32_t(f.data[2]) << 16) | (std::uint32_t(f.data[3]) << 8) | f.data[4];
                 float angle; std::memcpy(&angle, &bits, sizeof(angle)); fb.angle = angle;
@@ -423,21 +425,27 @@ struct EncosDriver::Impl {
     static constexpr std::uint8_t gateway_bus(int id) { return id >= 9 ? 1 : id >= 5 ? 2 : 3; }
     void run_gateway() {
         try {
-            std::array<std::uint64_t, 12> samples{};
             std::uint64_t seen_generation = ~0ULL;
             std::unique_lock<std::mutex> lock(mutex);
             while (running.load()) {
                 lock.unlock();
-                auto snaps = gateway->GetSnapshots();
-                auto stamp = now_ns();
+                auto snaps = gateway->GetTimedSnapshots();
                 lock.lock();
-                for (const auto& [key, snap] : snaps) {
+                for (const auto& [key, timed] : snaps) {
+                    const auto& snap = timed.state;
                     if (snap.id < 1 || snap.id > 12 || key.bus != gateway_bus(snap.id)) continue;
                     int i = snap.id - 1;
-                    if (!snap.samples || snap.samples == samples[i]) continue;
-                    samples[i] = snap.samples;
-                    Feedback fb; fb.stamp = stamp; fb.error = int(snap.error); fb.angle = snap.angle_deg;
-                    fb.current = (snap.valid & ::gateway::Current) ? snap.current_a : std::numeric_limits<double>::quiet_NaN();
+                    if (!snap.samples) continue;
+                    if (!timed.position_received_us || timed.position_received_us > now_ns()/1000)
+                        throw std::runtime_error("Invalid G4 position receive timestamp");
+                    Feedback fb; fb.stamp = timed.position_received_us*1000;
+                    fb.error = int(snap.error); fb.angle = snap.angle_deg;
+                    if ((snap.valid & ::gateway::Current) && timed.current_received_us) {
+                        if (timed.current_received_us > now_ns()/1000)
+                            throw std::runtime_error("Invalid G4 current receive timestamp");
+                        fb.current = snap.current_a;
+                        fb.current_stamp = timed.current_received_us*1000;
+                    } else fb.current = std::numeric_limits<double>::quiet_NaN();
                     feedback[i] = fb;
                 }
                 for (int id = 1; id <= 12; ++id) {
@@ -738,6 +746,84 @@ Vec12 EncosDriver::write_torque(const Vec12& torque, std::uint64_t deadline_ns) 
     }
     d.owned = true; d.submit_and_wait(next, deadline_ns, lock);
     return actual;
+}
+
+DriverImpedanceSubmission EncosDriver::write_impedance(const DriverImpedanceCommand& input, std::uint64_t deadline_ns) {
+    auto& d = *impl_; std::unique_lock<std::mutex> lock(d.mutex);
+    d.require_calibrated(); d.require_unlatched(); d.frame_locked(); d.check_deadline(deadline_ns);
+    if (!d.homed || !d.force || !d.has_force) throw std::runtime_error("Encos force mode not enabled");
+    std::array<Impl::Command,12> next{}; DriverImpedanceSubmission out;
+    for (int raw_id=0; raw_id<12; ++raw_id) {
+        const auto& m=d.motors[raw_id];const int i=m.index;const double a=m.factor;
+        auto& observed=out.observation[i];
+        const double q=d.feedback[raw_id].angle*pi/180.,dq=input.velocity_rad_s[i]/a;
+        out.estimate_received_ns[i]=d.feedback[raw_id].stamp;
+        out.command.velocity_received_ns[i]=input.velocity_received_ns[i];
+        double kp=input.kp[i]*a*a,kd=input.kd[i]*a*a,ff=input.feedforward_nm[i]*a;
+        const double target=m.zero*pi/180.+input.target_rad[i]/a;
+        const int direction=input.blocked_direction[i]*(a>0?1:-1);
+        if (!std::isfinite(target)||!std::isfinite(kp)||!std::isfinite(kd)||!std::isfinite(ff)||!std::isfinite(dq)||
+            kp<0||kd<0||std::abs(input.blocked_direction[i])>1)
+            throw std::invalid_argument("Invalid Encos impedance command");
+        if (direction && ff!=0) throw std::invalid_argument("Contact impedance cannot add friction feedforward");
+        const double low=std::max(-5.,m.min*pi/180.),high=std::min(5.,m.max*pi/180.);
+        if(target<low||target>high){observed.motion_limited=true;observed.add(ImpedanceReason::soft_limit_target);}
+        const int low_code=static_cast<int>(std::ceil((low+5.)*65535./10.));
+        const int high_code=static_cast<int>(std::floor((high+5.)*65535./10.));
+        if (low_code>high_code) throw std::runtime_error("Encos soft limits outside MIT position range");
+        const int pos=std::clamp(static_cast<int>(std::lround((std::clamp(target,low,high)+5.)*65535./10.)),low_code,high_code);
+        const auto rounded_position=std::lround((std::clamp(target,low,high)+5.)*65535./10.);
+        if(rounded_position<low_code||rounded_position>high_code){
+            observed.motion_limited=true;observed.add(ImpedanceReason::soft_limit_target);
+        }
+        const double qt=-5.+pos*10./65535.;
+        // 暂态模型预算不是驱动器硬限额，仍保留原始deadline和故障零电流路径。
+        const double budget=.85*d.force_limits[raw_id];
+        if(kp>500.||kd>5.){observed.torque_limited=true;observed.add(ImpedanceReason::sdk_gain_limited);}
+        if(std::abs(ff)>budget){observed.torque_limited=true;observed.add(ImpedanceReason::torque_budget_limited);}
+        kp=std::min(kp,500.);kd=std::min(kd,5.);ff=std::clamp(ff,-budget,budget);
+        bool accepted=false;
+        for(int attempt=0;attempt<12;++attempt) {
+            if(kp==0 && kd==0 && std::abs(ff)<half_lsb){observed.add(ImpedanceReason::sdk_zero_output);break;}
+            const auto kcode=static_cast<unsigned>(std::lround(kp*4095./500.));
+            const auto dcode=static_cast<unsigned>(std::lround(kd*511./5.));
+            const double k=kcode*500./4095.,b=dcode*5./511.;
+            int tcode=std::clamp(static_cast<int>(std::lround((ff+10.)*4095./20.)),0,4095);
+            if(direction && ff==0)tcode=direction>0?2047:2048;
+            const double f=-10.+tcode*20./4095.;
+            // MIT速度零同样是半LSB，不能在估算中假装精确为零。
+            const double pd=k*(qt-q)+b*(half_lsb-dq),nominal=pd+f;
+            const double predicted=nominal-k*dq*.02;
+            if((direction && (direction*nominal>0 || direction*predicted>0)) ||
+               (q<=low && nominal<0)||(q>=high && nominal>0)){
+                if(direction && (direction*nominal>0 || direction*predicted>0))observed.add(ImpedanceReason::sdk_direction_release);
+                if((q<=low && nominal<0)||(q>=high && nominal>0)){
+                    observed.motion_limited=true;observed.add(ImpedanceReason::soft_limit_release);
+                }
+                break;
+            }
+            if(std::abs(nominal)<=budget) {
+                observed.add(ImpedanceReason::sdk_output_accepted);
+                next[raw_id]={mit(pos,k,b,tcode),deadline_ns,true};accepted=true;
+                out.command.target_rad[i]=(qt-m.zero*pi/180.)*a;
+                out.command.kp[i]=k/(a*a);out.command.kd[i]=b/(a*a);
+                out.command.feedforward_nm[i]=f/a;out.command.velocity_rad_s[i]=input.velocity_rad_s[i];
+                out.command.blocked_direction[i]=input.blocked_direction[i];
+                out.nominal_nm[i]=nominal/a;out.pd_nm[i]=pd/a;out.friction_nm[i]=direction?0:f/a;
+                break;
+            }
+            // 比例缩小所有作用项，给下一轮编码预留半LSB，最多十二次后安全撤力。
+            observed.torque_limited=true;observed.add(ImpedanceReason::torque_budget_limited);
+            if(attempt==11)observed.add(ImpedanceReason::sdk_budget_release);
+            const double reduction=std::max(0.,budget-half_lsb)*.98/std::abs(nominal);
+            kp*=reduction;kd*=reduction;ff*=reduction;
+        }
+        if(!accepted) {
+            next[raw_id]={servo(d.feedback[raw_id].angle,0,0),deadline_ns,true};
+            out.command.target_rad[i]=(q-m.zero*pi/180.)*a;
+        }
+    }
+    d.owned=true;d.submit_and_wait(next,deadline_ns,lock);return out;
 }
 
 void EncosDriver::disable() {

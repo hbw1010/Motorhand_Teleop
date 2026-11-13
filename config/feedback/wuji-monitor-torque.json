@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "glove_calibrated": false,
+  "glove_calibration_id": "",
+  "glove_nm_per_a": [
+    5.1,
+    5.1,
+    5.1,
+    5.1,
+    5.1,
+    5.1,
+    5.1,
+    5.1,
+    5.1,
+    5.1,
+    5.1,
+    5.1
+  ],
+  "wuji_nm_per_a": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "glove_source": "沿用sim/config/default.yaml：2026-11-10空载约0.2A/Nm参考，仅用于电流换算估算",
+  "wuji_source": "未提供各关节Kt，保持未标定；不以软件限额代替力矩常数"
+}

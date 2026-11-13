@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -41,6 +41,12 @@ struct HandSnapshot {
     uint64_t samples;
     uint32_t board_timestamp_us, max_board_gap_us, max_host_gap_us;
     uint32_t host_over_10ms, board_over_10ms, tx_failures;
+};
+
+// 项目扩展：不更改HandSnapshot的C ABI布局，单独携带SDK解析位置包的主机steady时间。
+struct TimedHandSnapshot {
+    HandSnapshot state{};
+    uint64_t position_received_us{}, current_received_us{};
 };
 
 struct HandDiagnostics {
@@ -235,6 +241,9 @@ struct RouteState {
             window_start = now; window_samples = samples;
         }
         return true;
+    }
+    TimedHandSnapshot TimedSnapshot(uint64_t now) const {
+        return {Snapshot(now), feedback.position_time, feedback.current_time};
     }
     HandSnapshot Snapshot(uint64_t now) const {
         HandSnapshot result{};

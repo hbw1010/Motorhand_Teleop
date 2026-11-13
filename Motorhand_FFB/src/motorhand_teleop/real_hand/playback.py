@@ -121,9 +121,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--mapping", type=Path, help="MotorHand标定文件")
     parser.add_argument("--assets", type=Path, help="MotorHand模型资产目录")
     parser.add_argument("--feedback-linear-config", type=Path,
-                        default=_PROJECT_ROOT / "config/feedback/max-torque-linear-right.json")
+                        default=_PROJECT_ROOT.parent / "config/feedback/wuji-max-torque-linear-right.json")
     parser.add_argument("--contact-feedback-config", type=Path,
-                        default=_PROJECT_ROOT / "config/feedback/contact-impedance-right.json")
+                        default=_PROJECT_ROOT.parent / "config/feedback/wuji-contact-impedance-right.json")
     return parser
 
 

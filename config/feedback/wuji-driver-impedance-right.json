@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "description": "仿真driver_impedance思路的原生适配；代理来自受阻局部逆，不是实测接触面；hardness由CLI人工设定。力矩限额继续读取wuji-max-torque-linear-right.json。数组按原始电机ID。",
+  "driver_impedance": {
+    "stiffness_nm_per_rad": [
+      5.0,
+      60.0
+    ],
+    "gain": 1.0,
+    "damping_s": 0.008,
+    "damping_max": 0.5,
+    "joint_gain": [
+      1.8,
+      1.2,
+      1.2,
+      1.2,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "k_max_nm_per_rad": [
+      100,
+      80,
+      80,
+      80,
+      80,
+      80,
+      80,
+      80,
+      80,
+      80,
+      80,
+      80
+    ],
+    "release_lookahead_s": 0.02,
+    "damping_off_velocity_rad_s": 0.15,
+    "damping_on_velocity_rad_s": 0.05,
+    "torque_margin": 0.85
+  },
+  "friction_comp": {
+    "enabled": true,
+    "coulomb_nm": [
+      0.25,
+      0.1,
+      0.25,
+      0.25,
+      0.25,
+      0.25,
+      0.25,
+      0.25,
+      0.25,
+      0.25,
+      0.25,
+      0.25
+    ],
+    "viscous_nm_s_per_rad": 0.0,
+    "velocity_scale_rad_s": 0.08,
+    "velocity_deadband_rad_s": 0.02,
+    "gain": 1.0,
+    "max_nm": 0.6
+  },
+  "velocity_filter_hz": 12.0,
+  "surface_rate_rad_s": 1.0,
+  "inverse_regularization": 0.01,
+  "max_proxy_offset_rad": 0.15,
+  "feedback_ramp_s": 0.15
+}

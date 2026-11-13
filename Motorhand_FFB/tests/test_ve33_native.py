@@ -15,7 +15,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def _original_module(side):
-    root = ROOT / "assets/hand_motor_ve33" / f"hand_motor_ve33_{side}"
+    root = ROOT.parent / "assets/hand_motor_ve33" / f"hand_motor_ve33_{side}"
     spec = importlib.util.spec_from_file_location(
         f"native_geometry_oracle_{side}", root / "scripts/solve_closed_chain.py"
     )

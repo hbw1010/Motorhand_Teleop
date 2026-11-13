@@ -5,6 +5,7 @@
 #include "wuji_identity.hpp"
 
 #include <cstdint>
+#include <atomic>
 #include <string>
 
 namespace motorhand::native {
@@ -23,6 +24,7 @@ public:
     void connect();
     RealHandState read();
     void enable();
+    void home(const std::atomic<bool>* stop_requested = nullptr);
     void send(const Vec20& positions_rad, std::uint64_t original_deadline_ns);
     void disable();
     void close();

@@ -1,7 +1,7 @@
 # 第三方与用户提供资产
 
 - `assets/wuji-hand2/body/`：来自用户提供的 WujiHand2 模型资产。模型和网格的官方来源、版本风险与官方链接见 `docs/research/wujihand2-official.md`；本项目不重新声明其许可证。
-- `assets/hand_motor_ve33/`：来自用户提供的 vE.3.3 手套模型资产。目录内 `THIRD_PARTY_LICENSE` 记录闭链求解器依赖的 Apache-2.0 来源；各模型目录的 README 记录资产结构与当前验证边界。
+- `../assets/hand_motor_ve33/`：来自用户提供的 vE.3.3 手套模型资产。目录内 `THIRD_PARTY_LICENSE` 记录闭链求解器依赖的 Apache-2.0 来源；各模型目录的 README 记录资产结构与当前验证边界。
 - `src/motorhand_teleop/ve33_kinematics.py`：从当前工作区已有 vE.3.3 运动学实现导入，作为用户提供的内部工程代码使用；其依赖的模型闭链求解器来源和许可见上条资产目录说明。
 
 - `vendor/wuji-retargeting/`：固定官方 Wuji Retargeting 上游 `v2026.8.17`（commit `531f6ed4250b475d2e9231f54e988fc9b1c5b4ea`）用于离线 Hand2 重定向。其上游许可证和依赖声明以该目录内文件为准；本项目只通过配置和适配器调用，不修改官方优化器语义。
@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | 用户提供的 Hand2 URDF | `assets/wuji-hand2/body/urdf/{left,right}.urdf`；具体上游版本未确认，以清单中的文件哈希识别 | 每侧 26 个 STL，visual/collision 共 52 次引用；颜色内联。模型可用于 URDF 几何/关节树消费，不能仅凭文件名判定对应真机版本。 |
 | 官方 Hand2 Beta1 MJCF | `vendor/wuji-retargeting/wuji_retargeting/wuji-description/hand2/hand2_beta1/body/mjcf/{left,right}.xml`，子模块 commit `8271644a78d69ed9a4adcf9165d882c64ad33dfa` | 仿真训练模型；模型版本与真机版本不一定相同，实机映射、限位及参数须逐台核验。 |
-| vE.3.3 右/左 | `assets/hand_motor_ve33/hand_motor_ve33_{R,L}/hand_closed_chain.xml` 和 `hand_tree_only.urdf`，右手 CAD 导出日期 2026-10-26；左手为镜像而非独立 CAD 导出 | 每侧 93 个 STL。MJCF 有 56 条闭合点约束；URDF 只有树，不能单独表达闭链。Studio 版 `hand_studio_preview.xml` 另有预览范围限制，不应代替完整模型。 |
+| vE.3.3 右/左 | `../assets/hand_motor_ve33/hand_motor_ve33_{R,L}/hand_closed_chain.xml` 和 `hand_tree_only.urdf`，右手 CAD 导出日期 2026-10-26；左手为镜像而非独立 CAD 导出 | 每侧 93 个 STL。MJCF 有 56 条闭合点约束；URDF 只有树，不能单独表达闭链。Studio 版 `hand_studio_preview.xml` 另有预览范围限制，不应代替完整模型。 |
 
 静态清点时上述用户资产的模型网格引用均存在；URDF 使用内联颜色，vE.3.3 MJCF 直接使用 geom 颜色而非外部材质文件。完整性与加载仍应在接收环境重新验证。vE.3.3 的 `config/joint_space.json`、`joint_roles.json`、`loop_closures.yaml`、`assembly_branches.json` 和 `retarget_targets.json` 与模型一起使用：12 个真实指节坐标不是 12 个电机轴角，也不是 68 个树角；驱动树姿态需闭链求解及装配分支检查。固定四指侧摆、无小指 CMC 自由度；零位不是编码器零位。
 

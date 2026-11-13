@@ -10,7 +10,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def test_ve33_source_emits_mediapipe_points_and_thumb_midpoint():
-    source = Ve33LandmarkSource("right", asset_root=ROOT / "assets" / "hand_motor_ve33")
+    source = Ve33LandmarkSource("right", asset_root=ROOT.parent / "assets" / "hand_motor_ve33")
     frame = source.step({name: 0.0 for name in GLOVE_JOINTS})
 
     assert frame.points_m.shape == (21, 3)

@@ -16,6 +16,7 @@ find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
 add_library(motorhand_native_core STATIC
+  driver_impedance.cpp
   force_controller.cpp
   force_jacobian.cpp
   glove_output.cpp
@@ -39,8 +40,8 @@ target_include_directories(motorhand_native_hardware PUBLIC "${CMAKE_CURRENT_SOU
 target_link_libraries(motorhand_native_hardware PUBLIC nlohmann_json::nlohmann_json Threads::Threads)
 
 get_filename_component(PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../.." ABSOLUTE)
-# 驱动 2: STM32G4 LQS-GW02 gateway, vendor header-only C++ SDK (unmodified copy).
-set(ENCOS_G4_SDK_INCLUDE "${PROJECT_ROOT}/hardware/encos_g4_gateway_sdk/vendor/include")
+# 驱动 2: STM32G4 LQS-GW02 gateway, vendor header-only C++ SDK，位置收包时间扩展见vendor/LOCAL_CHANGES.md。
+set(ENCOS_G4_SDK_INCLUDE "${PROJECT_ROOT}/../hardware/encos_g4_gateway_sdk/vendor/include")
 target_include_directories(motorhand_native_hardware PRIVATE "${ENCOS_G4_SDK_INCLUDE}")
 
 # Read-only device discovery and firmware verification use the pinned C SDK.
@@ -75,6 +76,28 @@ set_target_properties(inference_bridge PROPERTIES BUILD_RPATH "${WUJI_SDK_ROOT}/
 
 option(MOTORHAND_NATIVE_TESTS "Build offline native control regression tests" OFF)
 if(MOTORHAND_NATIVE_TESTS)
+  add_executable(encos_gateway_snapshot_native_test "${PROJECT_ROOT}/tests/test_encos_gateway_snapshot_native.cpp")
+  target_include_directories(encos_gateway_snapshot_native_test PRIVATE "${ENCOS_G4_SDK_INCLUDE}")
+  target_link_libraries(encos_gateway_snapshot_native_test PRIVATE Threads::Threads)
+  add_test(NAME encos_gateway_snapshot_native_test COMMAND encos_gateway_snapshot_native_test)
+  add_executable(feedback_options_native_test "${PROJECT_ROOT}/tests/test_feedback_options_native.cpp")
+  target_link_libraries(feedback_options_native_test PRIVATE motorhand_native_control "${WUJI_UDEV_LIBRARY}")
+  add_test(NAME feedback_options_native_test COMMAND feedback_options_native_test)
+  add_executable(driver_impedance_native_test "${PROJECT_ROOT}/tests/test_driver_impedance_native.cpp" driver_impedance.cpp force_controller.cpp linear_force.cpp)
+  target_include_directories(driver_impedance_native_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(driver_impedance_native_test PRIVATE Eigen3::Eigen nlohmann_json::nlohmann_json)
+  add_test(NAME driver_impedance_native_test COMMAND driver_impedance_native_test)
+  set_tests_properties(driver_impedance_native_test PROPERTIES WORKING_DIRECTORY "${PROJECT_ROOT}")
+  add_executable(wuji_home_cancel_native_test "${PROJECT_ROOT}/tests/test_wuji_home_cancel_native.cpp" wuji_device.cpp)
+  target_include_directories(wuji_home_cancel_native_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(wuji_home_cancel_native_test PRIVATE Threads::Threads)
+  add_test(NAME wuji_home_cancel_native_test COMMAND wuji_home_cancel_native_test)
+  set_tests_properties(wuji_home_cancel_native_test PROPERTIES TIMEOUT 5)
+  add_executable(monitor_telemetry_native_test "${PROJECT_ROOT}/tests/test_monitor_telemetry_native.cpp" telemetry.cpp)
+  target_include_directories(monitor_telemetry_native_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(monitor_telemetry_native_test PRIVATE nlohmann_json::nlohmann_json Threads::Threads)
+  add_test(NAME monitor_telemetry_native_test COMMAND monitor_telemetry_native_test)
+  set_tests_properties(monitor_telemetry_native_test PROPERTIES WORKING_DIRECTORY "${PROJECT_ROOT}" TIMEOUT 10)
   enable_testing()
   add_executable(encos_native_test "${PROJECT_ROOT}/tests/test_encos_driver_native.cpp" encos_driver.cpp)
   target_compile_definitions(encos_native_test PRIVATE MOTORHAND_ENCOS_OFFLINE_TEST)
@@ -92,9 +115,9 @@ if(MOTORHAND_NATIVE_TESTS)
   target_link_libraries(trajectory_native_test PRIVATE nlohmann_json::nlohmann_json OpenSSL::Crypto Threads::Threads)
   add_test(NAME trajectory_native_test COMMAND trajectory_native_test)
   set_tests_properties(trajectory_native_test PROPERTIES TIMEOUT 30)
-  add_executable(glove_output_native_test "${PROJECT_ROOT}/tests/test_glove_output_native.cpp" glove_output.cpp)
+  add_executable(glove_output_native_test "${PROJECT_ROOT}/tests/test_glove_output_native.cpp" glove_output.cpp driver_impedance.cpp)
   target_include_directories(glove_output_native_test PRIVATE "${PROJECT_ROOT}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
-  target_link_libraries(glove_output_native_test PRIVATE Threads::Threads)
+  target_link_libraries(glove_output_native_test PRIVATE Threads::Threads Eigen3::Eigen nlohmann_json::nlohmann_json)
   add_test(NAME glove_output_native_test COMMAND glove_output_native_test)
   set_tests_properties(glove_output_native_test PROPERTIES TIMEOUT 30)
   add_executable(session_native_test "${PROJECT_ROOT}/tests/test_session_native.cpp")

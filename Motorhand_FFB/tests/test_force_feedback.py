@@ -18,7 +18,7 @@ from motorhand_teleop.real_hand.motor_hand import EncosGloveHardwareDriver, Enco
 from motorhand_teleop.retargeting import GloveWujiRetargetPipeline, default_retarget_config
 
 ROOT = Path(__file__).parents[1]
-ASSETS = ROOT / "assets" / "hand_motor_ve33"
+ASSETS = ROOT.parent / "assets" / "hand_motor_ve33"
 START = 1_000_000_000
 NOW = START + 200_000_000
 
@@ -471,7 +471,7 @@ def test_nominal_zero_quantization_ack_does_not_accumulate_force_or_mix_amp_unit
     from motorhand_teleop.real_hand.force_linear import MaxTorqueLinearConfig
 
     config = replace(
-        MaxTorqueLinearConfig.from_json(ROOT / "config/feedback/max-torque-linear-right.json"),
+        MaxTorqueLinearConfig.from_json(ROOT.parent / "config/feedback/max-torque-linear-right.json"),
         wuji_serial_number="offline-test-device",
         glove_max_output_torque_nm=np.full(12, 0.003),
         max_torque_slew_nm_s=np.full(12, 1e-6),
@@ -521,7 +521,7 @@ def test_pose_change_pauses_only_reflection_then_recovers_from_background_refres
         driver = rig.driver
     else:
         config = replace(
-            MaxTorqueLinearConfig.from_json(ROOT / "config/feedback/max-torque-linear-right.json"),
+            MaxTorqueLinearConfig.from_json(ROOT.parent / "config/feedback/max-torque-linear-right.json"),
             wuji_serial_number="offline-test-device", jacobian_max_age_s=10.0,
             jacobian_refresh_interval_s=100.0,
         )

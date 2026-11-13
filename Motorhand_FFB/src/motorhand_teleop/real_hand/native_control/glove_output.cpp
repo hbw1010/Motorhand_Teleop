@@ -1,5 +1,6 @@
 #include "glove_output.hpp"
 #include "encos_driver.hpp"
+#include "driver_impedance.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -39,6 +40,7 @@ struct GloveOutputWorker::Impl {
     };
     EncosDriver& driver;
     ForceController* force;
+    DriverImpedancePlanner* impedance;
     std::mutex mutex;
     std::mutex close_mutex;
     std::condition_variable changed;
@@ -50,7 +52,7 @@ struct GloveOutputWorker::Impl {
     std::uint64_t next_id = 0;
     bool barrier = false, closing = false, closed = false;
 
-    Impl(EncosDriver& d, ForceController* f) : driver(d), force(f) {
+    Impl(EncosDriver& d, ForceController* f, DriverImpedancePlanner* p) : driver(d), force(f), impedance(p) {
         thread = std::thread([this] { run(); });
     }
 
@@ -118,6 +120,7 @@ struct GloveOutputWorker::Impl {
                 }
                 if (req.kind == Kind::enter_force) {
                     force->reset(now_ns());
+                    if (impedance) impedance->reset(now_ns());
                     driver.enable_force();
                     std::lock_guard<std::mutex> lock(mutex);
                     mode = GloveOutputMode::force; completed.reset(); barrier = false; changed.notify_all();
@@ -126,7 +129,9 @@ struct GloveOutputWorker::Impl {
                 if (req.kind == Kind::enter_position) {
                     if (mode == GloveOutputMode::force) {
                         check_deadline(req.deadline, now_ns());
-                        driver.write_torque(Vec12{}, req.deadline);
+                        if (impedance) driver.write_impedance(DriverImpedanceCommand{}, req.deadline);
+                        else driver.write_torque(Vec12{}, req.deadline);
+                        if (impedance) impedance->reset(now_ns());
                     }
                     std::lock_guard<std::mutex> lock(mutex);
                     mode = GloveOutputMode::position; completed.reset(); barrier = false; changed.notify_all();
@@ -144,6 +149,8 @@ struct GloveOutputWorker::Impl {
                     result.applied = driver.write_position(req.position, req.deadline);
                 } else {
                     result.mode = GloveOutputMode::force;
+                    result.feedback_input_hand = req.hand;
+                    result.feedback_input_target = req.target;
                     check_source(req.hand.received_ns, now);
                     for (auto stamp : req.glove.received_ns) check_source(stamp, now);
                     // Zero source marks unavailable geometry. ForceController validates
@@ -156,10 +163,27 @@ struct GloveOutputWorker::Impl {
                     result.jacobian_source_ns = jac_ns;
                     result.force_computed = req.jacobian.has_value();
                     now = now_ns();
+                    result.contact_evaluated_ns = now;
                     check_deadline(req.deadline, now);
                     check_source(req.source, now);
-                    result.applied = driver.write_torque(result.force.model_motor_nm, req.deadline);
-                    force->acknowledge_torque(result.applied);
+                    if (impedance) {
+                        // ForceController仅作接触判据；旧虚拟力矩不得叠加到驱动PD。
+                        auto geometry = result.force;
+                        geometry.active = geometry.active && req.jacobian.has_value();
+                        auto plan = impedance->step(req.target,req.hand,req.glove,req.pose,jac,geometry,now);
+                        result.impedance_planned_ns = now_ns();
+                        result.impedance_observation = plan.observation;
+                        result.driver_impedance = true;
+                        result.force.active = result.force.active && plan.valid;
+                        result.force.model_motor_nm = plan.nominal_nm;
+                        result.force.projected_motor_nm = plan.nominal_nm;
+                        result.impedance = driver.write_impedance(plan.command,req.deadline);
+                        for(int i=0;i<12;++i)result.impedance_observation.axes[i].merge(result.impedance.observation[i]);
+                        result.applied = result.impedance.nominal_nm;
+                    } else {
+                        result.applied = driver.write_torque(result.force.model_motor_nm, req.deadline);
+                        force->acknowledge_torque(result.applied);
+                    }
                 }
                 const auto stamps = driver.last_command_write_ns();
                 result.last_write_ns = *std::max_element(stamps.begin(), stamps.end());
@@ -177,8 +201,8 @@ struct GloveOutputWorker::Impl {
     }
 };
 
-GloveOutputWorker::GloveOutputWorker(EncosDriver& driver, ForceController* force)
-    : impl_(std::make_unique<Impl>(driver, force)) {}
+GloveOutputWorker::GloveOutputWorker(EncosDriver& driver, ForceController* force, DriverImpedancePlanner* impedance)
+    : impl_(std::make_unique<Impl>(driver, force, impedance)) {}
 GloveOutputWorker::~GloveOutputWorker() { try { close(); } catch (...) {} }
 
 std::uint64_t GloveOutputWorker::submit_position(const Vec12& motor_rad, std::uint64_t source_ns,

@@ -23,7 +23,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from encos_hand.protocol import MotorProtocol, ERROR_MAP
 from encos_hand.channel_worker import HeadlessChannelWorker
 
-CALIBRATION_FILE = PROJECT_ROOT / "configs" / "joint_calibration.json"
+CALIBRATION_FILE = Path(os.environ.get("ENCOS_CALIBRATION_FILE", PROJECT_ROOT / "configs" / "sim" / "joint_calibration.json"))
 
 class QtChannelWorker(QThread):
     sig_scan_finished = pyqtSignal(int, list, dict)
@@ -579,7 +579,7 @@ class MotorMasterMultiCanWindow(QMainWindow):
         try:
             CALIBRATION_FILE.parent.mkdir(parents=True, exist_ok=True)
             CALIBRATION_FILE.write_text(json.dumps(self.calibrations, indent=2, ensure_ascii=False), encoding="utf-8")
-            self.txt_log.append(">> [标定保存] 参数已持久化至 configs/joint_calibration.json")
+            self.txt_log.append(f">> [标定保存] 参数已持久化至 {CALIBRATION_FILE}")
         except Exception as e:
             self.txt_log.append(f"❌ 标定写入失败: {e}")
 

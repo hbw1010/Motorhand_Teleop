@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture(params=["right", "left"])
 def mechanism(request):
     side = "R" if request.param == "right" else "L"
-    directory = ROOT / "assets" / "hand_motor_ve33" / f"hand_motor_ve33_{side}"
+    directory = ROOT.parent / "assets" / "hand_motor_ve33" / f"hand_motor_ve33_{side}"
     core = Ve33Kinematics(request.param, model_dir=directory)
     namespace = runpy.run_path(str(directory / "scripts/solve_closed_chain.py"))
     reference = namespace["ClosureSolver"](directory / "hand_tree_only.urdf", directory / "config/loop_closures.yaml")

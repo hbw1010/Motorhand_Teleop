@@ -14,7 +14,7 @@ ROOT = Path(__file__).parents[1]
 
 
 def test_real_ve33_solver_returns_motor_and_dependent_coordinates():
-    model = Ve33GloveModel("right", asset_root=ROOT / "assets/hand_motor_ve33")
+    model = Ve33GloveModel("right", asset_root=ROOT.parent / "assets/hand_motor_ve33")
     pose, motors = model.solve({name: 0.0 for name in GLOVE_JOINTS})
     assert set(pose.joints) == set(GLOVE_JOINTS)
     assert len(motors) == 12
@@ -24,7 +24,7 @@ def test_real_ve33_solver_returns_motor_and_dependent_coordinates():
 
 
 def test_real_ve33_transmission_jacobian_is_finite():
-    model = Ve33GloveModel("right", asset_root=ROOT / "assets/hand_motor_ve33")
+    model = Ve33GloveModel("right", asset_root=ROOT.parent / "assets/hand_motor_ve33")
     pose, _ = model.solve({name: 0.0 for name in GLOVE_JOINTS})
     jacobian = model.transmission().motor_jacobian(pose.vector())
     assert jacobian.shape == (12, 12)
@@ -34,7 +34,7 @@ def test_real_ve33_transmission_jacobian_is_finite():
 def cad_oracle(hand, motors):
     """Independent original CAD closure plus adjacent-body rotation oracle."""
     side = "L" if hand == "left" else "R"
-    root = ROOT / "assets/hand_motor_ve33" / f"hand_motor_ve33_{side}"
+    root = ROOT.parent / "assets/hand_motor_ve33" / f"hand_motor_ve33_{side}"
     spec = importlib.util.spec_from_file_location(f"oracle_{side}", root / "scripts/solve_closed_chain.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -62,7 +62,7 @@ def cad_oracle(hand, motors):
 
 @pytest.mark.parametrize("hand", ["left", "right"])
 def test_motor_forward_and_joint_inverse_match_original_cad_adjacent_rotations(hand):
-    model = Ve33GloveModel(hand, asset_root=ROOT / "assets/hand_motor_ve33")
+    model = Ve33GloveModel(hand, asset_root=ROOT.parent / "assets/hand_motor_ve33")
     motors = {name: 0.04 + index * 0.002 for index, name in enumerate(model.motor_names)}
     expected, _, _ = cad_oracle(hand, motors)
     pose, actual_motors = model.evaluate_motors(motors, timestamp_ns=123)

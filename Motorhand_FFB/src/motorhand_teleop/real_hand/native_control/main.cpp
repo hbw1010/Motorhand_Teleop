@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <csignal>
@@ -25,8 +26,9 @@ namespace {
 using namespace motorhand::native;
 using Clock = std::chrono::steady_clock;
 constexpr std::uint64_t timeout_ns = 100'000'000;
-volatile std::sig_atomic_t interrupted = 0;
-void on_signal(int) { interrupted = 1; }
+static_assert(std::atomic<bool>::is_always_lock_free, "signal flag must be lock-free");
+std::atomic<bool> interrupted{false};
+void on_signal(int) { interrupted.store(true, std::memory_order_relaxed); }
 std::uint64_t now_ns() {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count());
 }
@@ -44,6 +46,8 @@ struct Args {
     int rate = 50;
     int curves_port = 0;
     double duration_s = 0;
+    std::string feedback_mode;
+    double feedback_hardness = .3;
 };
 Args parse(int argc, char** argv) {
     if (argc < 2) throw std::invalid_argument("用法: motorhand-native {teleop|force-contact|force-linear|record|replay|takeover} [轨迹] [--execute] [--curves-port 端口]");
@@ -59,6 +63,8 @@ Args parse(int argc, char** argv) {
         else if (token == "--hand") { auto v = value(); if (v != "left" && v != "right") throw std::invalid_argument("hand必须为left或right"); out.left = v == "left"; }
         else if (token == "--rate") out.rate = std::stoi(value());
         else if (token == "--curves-port") out.curves_port = std::stoi(value());
+        else if (token == "--feedback-mode") out.feedback_mode = value();
+        else if (token == "--feedback-hardness") out.feedback_hardness = std::stod(value());
         else if (token == "--duration") out.duration_s = std::stod(value());
         else if (!token.empty() && token[0] != '-' && out.trajectory.empty()) out.trajectory = token;
         else throw std::invalid_argument("不支持的参数: " + token);
@@ -66,6 +72,11 @@ Args parse(int argc, char** argv) {
     if (out.rate < 1 || out.rate > 200 || out.curves_port < 0 || out.curves_port > 65535 ||
         !std::isfinite(out.duration_s) || out.duration_s < 0 || out.firmware.empty())
         throw std::invalid_argument("频率、时长、固件版本或曲线端口非法");
+    if ((!out.feedback_mode.empty() && out.feedback_mode!="torque" && out.feedback_mode!="driver-impedance") ||
+        !std::isfinite(out.feedback_hardness) || out.feedback_hardness<0 || out.feedback_hardness>1)
+        throw std::invalid_argument("反馈模式必须为driver-impedance或torque，人工硬度必须在0..1范围");
+    if (out.feedback_mode=="driver-impedance" && out.command!="force-contact")
+        throw std::invalid_argument("driver-impedance目前仅用于force-contact");
     if ((out.command == "record" || out.command == "replay" || out.command == "takeover") && out.trajectory.empty())
         throw std::invalid_argument("必须指定轨迹文件路径");
     return out;
@@ -73,17 +84,22 @@ Args parse(int argc, char** argv) {
 SessionOptions session_options(const Args& args) {
     const auto root = std::filesystem::current_path();
     SessionOptions options;
-    options.asset_root = root / "assets/hand_motor_ve33";
+    options.asset_root = root.parent_path() / "assets/hand_motor_ve33";
     options.retarget_yaml = root / "config/retargeting/official" / (args.left ? "left.yaml" : "right.yaml");
-    options.glove_mapping = root / "hardware/encos_dexhand/configs/glove_mapping.json";
-    options.linear_feedback = root / "config/feedback/max-torque-linear-right.json";
-    options.contact_feedback = root / "config/feedback/contact-impedance-right.json";
+    options.glove_mapping = root.parent_path() / "hardware/encos_dexhand/configs/ffb/glove_mapping.json";
+    options.linear_feedback = root.parent_path() / "config/feedback/wuji-max-torque-linear-right.json";
+    options.contact_feedback = root.parent_path() / "config/feedback/wuji-contact-impedance-right.json";
+    options.driver_impedance_config = root.parent_path()/"config/feedback/wuji-driver-impedance-right.json";
+    options.driver_impedance_feedback = args.command=="force-contact" && args.feedback_mode!="torque";
+    options.feedback_hardness = args.feedback_hardness;
     options.wuji_serial = args.serial;
     options.approved_firmware = args.firmware;
     options.left = args.left;
     options.force_feedback = args.command == "takeover" || args.command == "force-contact" || args.command == "force-linear";
     options.linear_force_feedback = args.command == "force-linear";
     options.glove_output = options.force_feedback;
+    options.zero_aligned_start = args.command == "force-contact" || args.command == "force-linear";
+    options.stop_requested = &interrupted;
     return options;
 }
 void print_torque(const SessionTick& tick, const std::array<EncosMotorCalibration, 12>& calibration) {
@@ -92,7 +108,7 @@ void print_torque(const SessionTick& tick, const std::array<EncosMotorCalibratio
         const auto& axis = calibration[model];
         raw.at(static_cast<std::size_t>(axis.raw_motor_id - 1)) = tick.glove_target[model] * axis.sign * axis.scale;
     }
-    std::cout << "手套MIT前馈[名义Nm,串口已提交,";
+    std::cout << (tick.driver_impedance ? "手套驱动PD总输出估算[发送时名义Nm," : "手套MIT前馈[名义Nm,串口已提交,");
     if (tick.linear_force) std::cout << "线性电流估计";
     else switch (tick.contact_phase) {
         case ContactPhase::waiting_geometry: std::cout << "等待几何"; break;
@@ -125,19 +141,24 @@ int live(const Args& args) {
     if (args.left && options.force_feedback) throw std::runtime_error("当前力反馈配置仅对右手校准");
     Session session(options);
     std::unique_ptr<TelemetryPublisher> telemetry;
-    if (args.curves_port) telemetry = std::make_unique<TelemetryPublisher>(args.curves_port, options.glove_mapping);
+    if (args.curves_port) telemetry = std::make_unique<TelemetryPublisher>(args.curves_port, options.glove_mapping, options.left);
     std::array<EncosMotorCalibration, 12> calibration{};
     if (options.force_feedback) {
         EncosDriver calibrated(options.glove_mapping.string(), options.linear_feedback.string());
         calibration = calibrated.calibration();
     }
+    if (options.driver_impedance_feedback)
+        std::cout << "反馈：驱动阻抗+自由空间摩擦；人工硬度=" << options.feedback_hardness
+                  << "（非在线估计）。代理来自受阻局部逆；名义PD预算不等于MIT硬力矩限额。" << std::endl;
     std::cout << "正在只读预检设备；MotorHand只读轮询包含0A探针。" << std::endl;
-    const auto identity = session.connect();
     std::unique_ptr<TrajectoryRecorder> recorder;
-    if (args.command == "record") recorder = std::make_unique<TrajectoryRecorder>(args.trajectory, identity.left ? "left" : "right", identity.serial, identity.firmware);
     try {
-        std::cout << (options.glove_output ? "即将回零手套并使能两侧。" : "即将使能Wuji；手套仅作0A只读轮询。") << std::endl;
+        const auto identity = session.connect();
+        if (args.command == "record") recorder = std::make_unique<TrajectoryRecorder>(args.trajectory, identity.left ? "left" : "right", identity.serial, identity.firmware);
+        std::cout << (options.zero_aligned_start ? "即将依次回零手套和Wuji，完成后启动零位对齐跟随。" :
+                     options.glove_output ? "即将回零手套并使能两侧。" : "即将使能Wuji；手套仅作0A只读轮询。") << std::endl;
         session.enable(); session.request_takeover(true);
+        if (options.zero_aligned_start) std::cout << "两侧回零完成，开始零位对齐跟随。" << std::endl;
         const auto start = Clock::now(); auto report = start;
         while (!interrupted) {
             const auto cycle = Clock::now();
@@ -154,9 +175,15 @@ int live(const Args& args) {
         }
         if (recorder) recorder->finish();
         session.stop();
+        if (telemetry) telemetry->status("stopped", "控制会话已正常结束");
         return interrupted ? 130 : 0;
+    } catch (const std::exception& error) {
+        if (recorder) { try { recorder->abort(); } catch (...) {} }
+        if (telemetry) telemetry->status("fault", error.what());
+        throw;
     } catch (...) {
         if (recorder) { try { recorder->abort(); } catch (...) {} }
+        if (telemetry) telemetry->status("fault", "控制会话出现未知异常，请查看控制终端");
         throw;
     }
 }

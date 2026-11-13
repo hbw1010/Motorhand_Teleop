@@ -221,6 +221,7 @@ void standard_test(const Files& files) {
     state = driver.read();
     for (int id=1; id<=12; ++id) {
         auto idx = 12-id; double raw = (-5.0 + 32768.0*10.0/65535.0)*180.0/pi;
+        check(state.current_received_ns[idx]==state.received_ns[idx], "完整MIT反馈应共享位置与电流收包时间");
         check(near(state.raw_degrees[idx], raw) && near(state.measured_current_a[idx], -2.0+2048.0*4.0/4095.0), "MIT feedback decode");
     }
     buses.mit_feedback(false);
@@ -332,6 +333,52 @@ void partial_submission_test(const Files& files) {
     for (bool s : stopped) check(s, "close did not submit passive command for each axis");
 }
 
+// 失败目标：漏掉 a² 增益变换、量化/阻尼预算、负轴方向或精确撤力。
+void impedance_test(const Files& files) {
+    FakeBuses buses({{{1,2,3,4}, {5,6,7,8}, {9,10,11,12}}});
+    EncosDriver driver(files.mapping.string(), files.limits.string(), buses.paths());
+    driver.connect(); driver.mark_homed(); driver.enable_force();
+    DriverImpedanceCommand command;
+    command.target_rad.fill(-.02); command.kp.fill(10);command.kd.fill(.05);command.blocked_direction.fill(1);
+    auto mark=buses.mark();auto applied=driver.write_impedance(command,now_ns()+100000000);
+    auto frames=buses.after(mark,0);std::array<bool,12> seen{};
+    for(const auto& f:frames){auto w=word(f);if((w>>61)!=0||!((w>>49)&0xfff))continue;
+        const int index=12-f.id;double factor=(f.id%2?1.:-1.)*1.5;
+        double kp=((w>>49)&0xfff)*500./4095.;double kd=((w>>40)&0x1ff)*5./511.;
+        double raw=-5.+((w>>24)&0xffff)*10./65535.;
+        check(std::abs(kp-22.5)<.13 && std::abs(kd-.1125)<.011,"阻抗增益必须按a平方转换");
+        check(std::abs(raw*factor+.02)<.0003,"阻抗目标必须按符号和scale转换");
+        check(applied.nominal_nm[index]<0 && std::abs(applied.nominal_nm[index]*factor)<.85,"量化后名义总PD必须方向正确且有预算");
+        check(near(applied.command.kp[index],kp/(factor*factor)),"返回命令必须来自实际编码增益");
+        check(applied.friction_nm[index]==0,"接触零前馈编码残差不能冒充摩擦补偿");seen[f.id-1]=true;
+    }
+    for(bool x:seen)check(x,"必须向全部轴发送阻抗命令");
+    command.target_rad.fill(-1);command.kp.fill(60);command.kd.fill(.48);command.velocity_rad_s.fill(2);
+    applied=driver.write_impedance(command,now_ns()+100000000);
+    for(int i=0;i<12;++i)check(std::abs(applied.nominal_nm[i]*1.5)<=.850001,"大误差和阻尼不得突破发送时总预算");
+    for(const auto& o:applied.observation)check(o.torque_limited,"SDK额外缩放预算必须可观测");
+    command={};mark=buses.mark();applied=driver.write_impedance(command,now_ns()+100000000);
+    frames=buses.after(mark,2);seen={};for(const auto& f:frames){auto w=word(f);if((w>>61)==1&&((w>>2)&0xfff)==0)seen[f.id-1]=true;}
+    for(int i=0;i<12;++i)check(seen[i]&&applied.nominal_nm[i]==0,"撤力必须使用精确零电流而非MIT半LSB");
+    for(const auto& o:applied.observation)check(o.reasons&static_cast<std::uint64_t>(ImpedanceReason::sdk_zero_output),"精确零输出必须记录实际提交分支");
+    // 撤离时总输出会向内拉，即便弹簧自身仍向外，也必须关掉PD。
+    driver.disable();for(int id=1;id<=12;++id)buses.set_angle(id,0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));driver.enable_force();
+    command={};command.target_rad.fill(-.0021);command.kp.fill(40);command.kd.fill(.32);
+    command.velocity_rad_s.fill(-.1);command.blocked_direction.fill(1);
+    applied=driver.write_impedance(command,now_ns()+100000000);
+    for(int i=0;i<12;++i)check(applied.nominal_nm[i]<=0 && applied.command.kp[i]==0,"量化后预测撤离应关闭回拉PD");
+    for(const auto& o:applied.observation)check(o.reasons&static_cast<std::uint64_t>(ImpedanceReason::sdk_direction_release),"SDK预测方向保护必须带出撤力原因");
+    driver.disable();for(int id=1;id<=12;++id)buses.set_angle(id,id%2?30.f:-30.f);
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));driver.enable_force();
+    command={};command.feedforward_nm.fill(.25);
+    applied=driver.write_impedance(command,now_ns()+100000000);
+    for(double v:applied.nominal_nm)check(v==0,"达到软件限位后不能用摩擦补偿向外推");
+    for(const auto& o:applied.observation)check(o.motion_limited&&
+        (o.reasons&static_cast<std::uint64_t>(ImpedanceReason::soft_limit_release)),"SDK软限位撤力必须带出标志与原因");
+    driver.close();
+}
+
 void duplicate_scan_test(const Files& files) {
     FakeBuses buses({{{1,2,3,4}, {5,6,7,8}, {8,9,10,11}}});
     EncosDriver driver(files.mapping.string(), files.limits.string(), buses.paths());
@@ -357,6 +404,6 @@ void stop_failure_test(const Files& files) {
     check(stop_error && close_error, "explicit close must report stop and SLCAN C failures");
 }
 int main() {
-    try { Files files; duplicate_scan_test(files); standard_test(files); partial_submission_test(files); stop_failure_test(files); std::cout << "Encos offline protocol tests passed\n"; return 0; }
+    try { Files files; impedance_test(files); duplicate_scan_test(files); standard_test(files); partial_submission_test(files); stop_failure_test(files); std::cout << "Encos offline protocol tests passed\n"; return 0; }
     catch (const std::exception& e) { std::cerr << "Encos offline protocol test failed: " << e.what() << '\n'; return 1; }
 }

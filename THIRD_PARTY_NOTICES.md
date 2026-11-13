@@ -32,3 +32,7 @@ python -m pytest tests/test_training_assets.py
 ```
 
 测试检查清单入口哈希、模型内网格引用、URDF 树链接与材质引用，并用 MuJoCo 加载所列 MJCF；它不证明网格内容未改变、URDF 被特定下游加载器成功导入或动力学真实性。下游 URDF 加载器应从原路径加载并自行验证闭链、材质与单位；此处不宣称任意加载器兼容。
+
+## G4网关SDK本地扩展
+
+`hardware/encos_g4_gateway_sdk/vendor/` 为用户提供的STM32G4 LQS-GW02厂商SDK。为原生驱动阻抗增加了独立的真实主机位置收包时间快照接口，并修正快照年龄的取时顺序；协议与既有Python C ABI布局保持兼容。具体文件和验证边界见 [LOCAL_CHANGES.md](hardware/encos_g4_gateway_sdk/vendor/LOCAL_CHANGES.md)，本项目不重新声明该SDK的许可证。
