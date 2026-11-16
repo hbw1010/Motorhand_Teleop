@@ -1,10 +1,29 @@
 ﻿# Encos 12-Axis Dexterous Hand SDK (v0.3.0)
 
+## 本文档范围
+
+所属分支：`sim2.0`。原 sim3.0 的统一工作区；Pixi 任务从仓库根目录运行，sim/ffb 标定分别管理。
+
+本文件说明 Encos SDK 的电机读写与原始单位；重定向、受阻判定和反馈规划由上层控制器负责。SDK 示例不等于项目默认启动流程。
+
+[返回仓库首页与分支对照](../../README.md)
+
 ## 1. 快速上手 (Pixi 工作流)
-pixi run test   # 终端自检 12 轴并实时打印物理角度
-pixi run gui    # 启动图形化调试上位机
+在统一工作区根目录运行；此目录没有独立 Pixi 清单：
+
+```bash
+pixi run check-glove   # 项目只读连接检查，默认驱动取 sim 配置
+pixi run encos-test    # SDK 12 轴交互调试，可能执行电机操作
+pixi run gui           # SDK 图形调试，可能使能电机；使用 FFB 标定
+```
+
+`pixi run test` 在根目录表示离线测试合集，不是 SDK 硬件自检。G4 的厂商 SDK 位于相邻 `encos_g4_gateway_sdk/`；仿真与原生控制分别通过自己的适配层使用它。
 
 ## 2. 算法端 Python SDK 调用示例
+
+以下位置/MIT 调用会驱动电机，需要先完成现场配置；不是只读示例。
+
+```python
 from encos_hand import EncosHand
 
 hand = EncosHand()
@@ -21,13 +40,14 @@ hand.set_position(motor_id=8, target_deg=35.0, speed_rpm=30.0)
 hand.set_mit(motor_id=8, target_deg=20.0, kp=45.0, kd=0.5)
 
 hand.close()
+```
 
 ## 3. 外层项目算法接入
 
-外层项目通过 `wujihand2_force_glove.EncosGloveHardwareDriver` 使用本 SDK：
+外层项目通过 `motorhand_teleop.real_hand.motor_hand.EncosGloveHardwareDriver` 使用本 SDK：
 
 ```python
-from wujihand2_force_glove import EncosGloveHardwareDriver
+from motorhand_teleop.real_hand.motor_hand import EncosGloveHardwareDriver
 
 glove = EncosGloveHardwareDriver()
 glove.connect()
@@ -58,7 +78,7 @@ configs/ffb/glove_mapping.json
 `glove_mapping.json`的`min_deg/max_deg`已换算成原始编码器范围，`calibrated=true`。
 正向轴以`zero_deg+相对角度`换算；反向轴J4/J6/J8/J10/J12的原始范围为`[zero_deg-90°,zero_deg]`。
 力矩常数仍未标定，不能把位置控制许可当作已标定的电流→Nm换算许可。
-外层新增显式名义Nm近似模式时，直接调用SDK torque_nm，不填假Kt或宣称真实接触力。
+显式名义 Nm 前馈直接使用 SDK 的 torque_nm。当前原生驱动阻抗由 `Motorhand_FFB/src/motorhand_teleop/real_hand/native_control/` 的规划器和 EncosDriver 负责，不经过本节 Python 包装器。
 
 ## 4. 原始反馈与命令期限
 
@@ -72,7 +92,7 @@ configs/ffb/glove_mapping.json
 不传期限的旧 SDK／GUI 调用维持原接口，调用者必须自行管理停止。
 这是主机侧保护，不等价于已验证设备断链保护或硬件急停。
 
-位置跟随MIT固定45/0.5；接管纯力矩前馈另用0/0。首次使能仍由外层servo回零，J1=1.5A、其余1A、5rpm、0.15rad。
+本 SDK 及旧 Python 包装器的位置跟随使用 MIT 45/0.5，纯力矩前馈使用 0/0；新版原生驱动阻抗动态规划逐轴目标和 kp/kd，不能用前述固定值概括。首次使能仍由外层servo回零，J1=1.5A、其余1A、5rpm、0.15rad。
 前馈 `current_limit_a` 检查不代表可以观测或限制 MIT PD 产生的全部实际电流；
 无真实 Kt 及电流／力矩标定时，不得把零前馈位置跟随宣称为真实接触力反馈。
 

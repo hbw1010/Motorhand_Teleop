@@ -1,5 +1,26 @@
 # Wuji 右手反馈配置
 
+## 本文档范围
+
+所属分支：`sim2.0`。原 sim3.0 的统一工作区；Pixi 任务从仓库根目录运行，sim/ffb 标定分别管理。
+
+本目录是当前 Wuji 真机反馈配置；仿真参数在 sim/config/default.yaml，显示换算参数与控制参数也需区分。
+
+[返回仓库首页与分支对照](../../README.md)
+
+## 当前生效文件与模式
+
+| 文件 | 当前作用 |
+|---|---|
+| `wuji-max-torque-linear-right.json` | 设备身份、名义输出上限、线性负载参数及几何有效期 |
+| `wuji-contact-impedance-right.json` | 两种接触模式共享的受阻判据；虚拟 K/D、反射倍率用于旧 torque 路径 |
+| `wuji-driver-impedance-right.json` | 默认驱动阻抗的刚度、代理限速、摩擦、启动渐入及规划预算 |
+| `wuji-monitor-torque.json` | 仅供监视器做电流×Kt换算，不参与控制 |
+
+参数作用范围：默认驱动阻抗不把旧 `reflection_gain` 放大后的力矩叠加到 PD，也不使用旧 `max_torque_slew_nm_s` 限制最终 PD 输出。原生 Jacobian 后台按新手套帧提交、只保留最新待算姿态；`jacobian_refresh_interval_s` 在这条原生路径仅校验，没有控制调度间隔。Python 历史控制器与仿真应分别查看自己的实现。
+
+当前 J1/J2 名义上限各 10 Nm，其余各 4 Nm；默认驱动阻抗规划与提交预算保留 0.85 系数。提交层包含编码量化检查，但 MIT PD 没有由此获得硬力矩上限。下文保留历史调整记录，较早记录中的限额不代表当前值。配置启动时加载，修改后需重启对应控制进程。
+
 2026-11-12 按用户要求，将仓库 `tianji_teleop/config/motorhand_feedback/` 两份右手反馈 JSON 的参数迁移为当前 Wuji 配置，统一使用 `wuji-` 文件名与 `source_id`。初次迁移的参数与 `Motorhand_FFB/tianji_teleop/` 中的源副本相同；后续现场调整记录如下。
 
 - `wuji-max-torque-linear-right.json`：J1、J2上限各10 Nm，J3–J12上限各4 Nm，增力斜率60 Nm/s，Wuji电流负载归一化参考1.5 A，几何刷新间隔0.05 s。

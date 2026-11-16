@@ -1,5 +1,13 @@
 # Motorhand_FFB
 
+## 本文档范围
+
+所属分支：`sim2.0`。原 sim3.0 的统一工作区；Pixi 任务从仓库根目录运行，sim/ffb 标定分别管理。
+
+本文件负责 Wuji 遥操作和 FFB 子项目；外层 sim/README.md 负责手套与虚拟物体的交互，二者反馈输入和启动命令不同。
+
+[返回仓库首页与分支对照](../README.md)
+
 Motorhand 外骨骼手套到 Wuji Hand 2 的手部遥操作项目，使用工作区外层共享驱动、模型和配置：
 
 - 12 电机手套读取、vE3.3 闭链和 WujiRetarget；
@@ -58,11 +66,23 @@ MOTORHAND_GLOVE_DRIVER=2 pixi run wuji-force-contact \
 
 设备绑定及名义输出参数在 `../config/feedback/wuji-max-torque-linear-right.json`，接触估计参数在 `../config/feedback/wuji-contact-impedance-right.json`。2026-11-12 经用户确认，将此次新标的 sim 零位和配套限位同步到 `configs/ffb/` 的两份标定，方向、比例和力控参数不变。两套文件仍独立，后续 `zero-glove` 不会自动同步 FFB；更换设备或重新标零后需再次核对。
 
+## 三种真机反馈方式与监视
+
+| 入口 | 反馈来源与输出 | 参数 |
+|---|---|---|
+| `wuji-force-contact`（默认） | Wuji 电流/速度/跟踪误差判定受阻，局部逆映射生成手套代理，输出 MIT PD；自由轴摩擦补偿 | `wuji-driver-impedance-right.json`，人工 `--feedback-hardness` 默认 0.3 |
+| `wuji-force-contact --feedback-mode torque` | 虚拟接触弹簧阻尼，经重定向及机构传动投影为 MIT 纯前馈 | `wuji-contact-impedance-right.json` 的虚拟 K/D 与反射增益 |
+| `wuji-force-linear` | Wuji 电流相对参考值的负载占比，经几何投影和包络归一化产生纯前馈 | `wuji-max-torque-linear-right.json` |
+
+三种模式共享设备绑定和名义限额；旧路径的 `reflection_gain=1500` 与 `max_torque_slew_nm_s=60` 不直接作用于默认模式最终提交的 PD 输出。默认模式的 `glove_target` 表示量化参数在提交时刻估算的总名义输出；`virtual_hand_torque_nm` 保留作诊断，未叠加到驱动 PD。手套实测电流主要用于显示，不能据此宣称已实现测力闭环。
+
+控制端增加 `--curves-port 8765` 后，可以另开 `pixi run teleop-ui` 查看反馈判据、代理位置、PD/摩擦及限制原因；`pixi run force-ui` 是旧版曲线查看器，PlotJuggler 旁路见 [scripts/README.md](scripts/README.md)。查看器只读 UDP，不额外读设备；关闭查看器不停止控制。
+
 ## 反馈与安全
 
 真机控制使用工作区的 `config/feedback/` 配置。电流、SDK 名义力矩和软件估计不是实测接触力；首次上手必须低负载，确认方向和独立急停。两套手套标定分别保存在 `hardware/encos_dexhand/configs/sim/` 和 `hardware/encos_dexhand/configs/ffb/`，不可未经核对互换。
 
-历史天机反馈参数及原配置保留在各自的 `tianji_teleop/config/` 和 `config/motorhand_feedback/`。左手模板不是已完成的硬件标定。更多安全约束见 `CONTEXT.md`。
+历史天机反馈参数及原配置保留在各自的 `tianji_teleop/config/` 和 `config/motorhand_feedback/`。左手模板不是已完成的硬件标定。更多坐标和运行约定见工作区根目录 [CONTEXT.md](../CONTEXT.md)。
 
 ## 离线验证
 

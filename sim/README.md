@@ -1,12 +1,22 @@
 # Motorhand 手套力反馈独立仿真
 
-本目录是从 `hbw1010/Motorhand_Teleop` 抽取的手部链路独立工程，**不包含 Wuji 灵巧手、ROS2、PICO、DAgger**。链路为：
+## 本文档范围
+
+所属分支：`sim2.0`。原 sim3.0 的统一工作区；Pixi 任务从仓库根目录运行，sim/ffb 标定分别管理。
+
+本文件负责 glove_sim 手套物体交互；Wuji 真机和其遥测入口见 Motorhand_FFB/README.md。仿真接触力不能用于证明 Wuji 真机反馈已标定。
+
+[返回仓库首页与分支对照](../README.md)
+
+本目录是统一工作区中的手套物体交互子项目，不连接 Wuji 灵巧手或 ROS2。默认 `driver_impedance` 链路为：
 
 ```
 真实手套编码器/状态 → 12 电机角 → CAD 闭环运动学 → MuJoCo 手套本体模型
-        → 与虚拟物体接触/形变/受力 → 接触力投影到 12 个电机轴
-        → 力矩上限/斜率/滤波/爬升 → 真机 MIT 力矩前馈（kp=kd=0）
+        → 虚拟物体接触与代理表面 → 每轴目标角、刚度、阻尼
+        → 名义输出预算与撤离保护 → 真机 MIT PD；自由轴使用摩擦前馈
 ```
+
+旧 `proxy_spring` / 接触力投影模式在主机侧计算名义力矩，以 MIT `kp=kd=0` 前馈输出；其斜率和滤波不能当作默认驱动 PD 的统一约束。Wuji 真机的代理来自受阻误差，本仿真的代理来自虚拟物体表面。
 
 ## 1. 目录
 
@@ -19,7 +29,7 @@
 | `config/default.yaml` | 仿真、物体、反馈、遥测配置 |
 | `../assets/hand_motor_ve33/hand_motor_ve33_R/` | 手套本体 MJCF、STL、闭环求解脚本 |
 | `../hardware/encos_dexhand/` | 驱动 1：Encos SDK（CANable2）与 `glove_mapping.json` / `joint_calibration.json` |
-| `../hardware/encos_g4_gateway_sdk/vendor/` | 驱动 2：厂商 STM32G4 网关 Linux C++ SDK 原样（不修改） |
+| `../hardware/encos_g4_gateway_sdk/vendor/` | 驱动 2：厂商 STM32G4 网关 Linux C++ SDK；本地时间戳扩展见 `vendor/LOCAL_CHANGES.md` |
 | `../hardware/encos_g4_gateway_sdk/shim/g4_shim.cpp` | 驱动 2：SDK 之上的 C 接口 + 指令超时卸力 + 接收时间戳 |
 | `../Motorhand_FFB/src/motorhand_teleop/encos_home.py` | 统一使能回零工具（`home-glove` 显式传入仿真标定） |
 | `../hardware/encos_dexhand/udev/90-motorhand-glove.rules` | CANable2 普通用户访问规则 |
@@ -33,17 +43,17 @@
 要求：Linux x86_64、Python 3.12（由 Pixi 管理）、可用的 OpenGL 图形会话（仅 UI 需要）。
 
 ```bash
-cd /home/fcl/hbw/Motorhand_Teleop/sim
+# 在仓库根目录执行；任务自动进入 sim/
 pixi install --frozen        # 使用 pixi.lock，避免重新求解卡住
 pixi run smoke               # 23 项离线冒烟
-pixi run test                # pytest
+pixi run test-sim            # 仅仿真 pytest；test 会同时运行 FFB 测试
 ```
 
 如果 `pixi install` 因网络/锁文件更新很慢，使用 `--frozen`；若 pypi 包被 Pixi 重装后缺失，可修复：
 
 ```bash
 uv pip install --python .pixi/envs/default/bin/python \
-  -e . -e ../hardware/encos_dexhand
+  -e sim -e hardware/encos_dexhand
 ```
 
 没有图形显示时所有仿真都必须加 `--headless`；`pixi run sim` 会检查 `DISPLAY/WAYLAND_DISPLAY` 并给出提示。
@@ -61,7 +71,7 @@ uv pip install --python .pixi/envs/default/bin/python \
 
 驱动 2 说明：
 
-- 厂商 SDK 是纯头文件 C++（`lqs::HandClientG4`），`vendor/` 下原样保存、不改。Python 通过 `shim/g4_shim.cpp` 编译出的 `build/libg4_shim.so` 调用，首次使用时自动 `g++ -std=c++17` 编译（源文件更新会自动重编）。
+- 厂商 SDK 是纯头文件 C++（`lqs::HandClientG4`），项目对接收时间快照做了最小扩展，见 `../hardware/encos_g4_gateway_sdk/vendor/LOCAL_CHANGES.md`。Python 通过 `shim/g4_shim.cpp` 编译出的 `build/libg4_shim.so` 调用，首次使用时自动 `g++ -std=c++17` 编译（源文件更新会自动重编）。
 - SDK 自己的 200 Hz IO 线程在 C++ 里跑，不受 Python GIL / MuJoCo / UI 影响。接线按 SDK 固定：CAN1=ID9–12，CAN2=ID5–8，CAN3=ID1–4。
 - 未使能时 SDK 每周期对每台电机发 `E0 01` 只读查询；MIT 目标角用度（SDK 内部转弧度）。
 - shim 只在 SDK 之上加了两件事：① 指令超时（`command_ttl_s`）后自动发零增益 MIT 再回到只读查询，避免 SDK 无限重发旧 MIT 目标；② 每台电机的主机接收时间戳（SDK 快照里的 `age_ms`/`online` 以周期开始时刻计算，不能当绝对时间用）。
@@ -77,7 +87,7 @@ uv pip install --python .pixi/envs/default/bin/python \
 ```bash
 sudo groupadd -f plugdev
 sudo usermod -aG plugdev "$USER"      # 重新登录后生效
-sudo cp ../hardware/encos_dexhand/udev/90-motorhand-glove.rules /etc/udev/rules.d/
+sudo cp hardware/encos_dexhand/udev/90-motorhand-glove.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 lsusb | grep -i 16d0:117e
@@ -86,7 +96,7 @@ lsusb | grep -i 16d0:117e
 3. 只读检查 12 轴：
 
 ```bash
-cd /home/fcl/hbw/Motorhand_Teleop/sim
+# 在仓库根目录执行；任务自动进入 sim/
 pixi run check-glove
 ```
 
@@ -144,7 +154,7 @@ pixi run teleop --headless --duration 5
 pixi run teleop --headless --feedback --duration 10
 ```
 
-UI 启动时反馈默认关闭。先看 `check-glove`、确认手在安全位置、再做 `home-glove`；在 UI 勾选“启用力反馈”后才发送 MIT 力矩前馈。UI 的“急停 / 清零”会立即关闭反馈、把所有电机力矩命令置零并失能（真机路径）；真机读取失败或出现电机报警时运行器也会自动急停。
+UI 启动时反馈默认关闭。先看 `check-glove`、确认手在安全位置、再做 `home-glove`；在 UI 勾选“启用力反馈”后才输出；默认发送 MIT 阻抗参数，旧反馈模式发送纯力矩前馈。UI 的“急停 / 清零”会立即关闭反馈、把所有电机力矩命令置零并失能（真机路径）；真机读取失败或出现电机报警时运行器也会自动急停。
 
 ### 5.3 UI 操作
 
@@ -183,7 +193,7 @@ pixi run replay data/glove_session-YYYYMMDD-HHMMSS.jsonl
 | `sim_joint_i_rad`, `sim_vel_i_rad_s` | 仿真手套对应电机轴位置/速度 | rad, rad/s |
 | `torque_raw_i_nm` | 接触力雅可比转置得到的**未限幅名义力矩** | Nm |
 | `torque_cmd_i_nm` | 经上限、斜率、滤波、爬升、死区后的**名义力矩指令** | Nm |
-| `measured_current_i_a` | SDK 回读电流（真机）；假手套为 `torque/0.035` 的演示代理 | A |
+| `measured_current_i_a` | SDK 回读电流（真机）；假手套为模拟电流，不能当作实测 | A |
 | `estimated_force_i_n` | 无真实力传感器、无力标定，**留空并标记 uncalibrated** | — |
 | `grasp_hold` | 任一手指接触力 > 0.2 N 的派生保持指示 | bool |
 | `slip_validity`, `slip_m` | 物体默认位姿锁定，**滑移不可用**；留空 | — |
@@ -191,8 +201,8 @@ pixi run replay data/glove_session-YYYYMMDD-HHMMSS.jsonl
 **严格区分**：
 
 - 仿真接触力 ≠ 实测力；CSV 不把它写成 measured force。
-- `torque_cmd` 是名义 Nm，不是实测力矩；`torque_sign` 默认全 +1，**方向未在真机标定**。
-- `measured_current` 是实测电流，但没有 Kt/电流—力矩标定，不能换算成“真实接触力”。
+- `torque_cmd` 是名义 Nm，不是实测力矩；`torque_sign` 默认全 +1；历史空载方向检查见第 9 节，仍需按当前设备核对。
+- `measured_current` 在真机下是实测电流；配置中的 5.1 Nm/A 只用于近似显示，不能换算成已标定的真实接触力。
 - `estimated_force` 未标定，不提供数值。
 - 物体默认锁定，所以不提供物体滑移测量；`grasp_hold` 只是接触力派生指示。
 
@@ -251,7 +261,9 @@ d = s.mjdata_at(i)                          # 该时刻的 MuJoCo MjData，可�
 - 外置弹簧/旧模式：`kp=0,kd=0` 的 MIT 力矩前馈，默认上限 `[4,2,4,4,4,4,4,4,4,4,4,4] Nm`，斜率 60 Nm/s，滤波 25 Hz，爬升 0.15 s，死区 0.01 Nm。命令 TTL 0.1 s，过期后 SDK 不再重发旧目标。
 - UI 使用 DearPyGui + MuJoCo EGL 渲染子进程（隔离 GL 上下文）；自定义深色控制台主题、字号/卡片/状态色，渲染 1280×720（16:9）。曝光已调低（headlight ambient 0.16、diffuse 0.24，key/fill 环境光同步降低），避免白手套和亮色物体过曝。不再绘制低分辨率阴影（会严重锯齿），地面使用程序生成的参考网格；动态纹理直接传 numpy 缓冲区。状态栏同时显示**反馈接触**（幽灵目标，用于触感）与**可视穿透点/深度**（真实主数据），锁定模式下后者应为 0 点/0.0 mm。物理仍按 1 kHz 步进，UI 每帧最多补 30 步；实测抓握/软球接触约 12–20 Hz，暂停演示且无接触约 27–43 Hz。软球 flex 接触是主要计算开销；无图形环境必须 `--headless`。
 
-## 8. 已验证（本机离线）
+## 8. 历史验证记录
+
+以下数量及性能值是此前记录，不代表本次分支改名后的重新验收。当前仿真检查用根目录 `pixi run smoke` / `pixi run test-sim`，当前真机原生离线检查用 `pixi run test-control-native`。
 
 - `pixi install --frozen`、`pixi run smoke`（23/23）、`pixi run test`（9/9，含防穿模回归测试）。
 - 模型可编译；17 个碰撞代理；初始布局无接触；位姿锁定无漂移；拖动位姿保持。
