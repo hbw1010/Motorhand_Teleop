@@ -1,5 +1,13 @@
 # Motorhand 手套 → 天机 Wuji 二代手
 
+## 本文档范围
+
+所属分支：`tianji_teleop`。天机手部 ROS2 接入分支；根目录 SDK 直连任务与天机 worker 使用不同状态来源和配置。
+
+本文件负责依赖天机工作区的手部话题接入；根目录 wuji-* 任务是 SDK 直连。若使用 sim 分支的独立 FFB 适配器，请阅读 Motorhand_FFB/tianji_teleop/README.md。
+
+[返回仓库首页与分支对照](../README.md)
+
 天机遥操作（tianji_teleop）里用 Motorhand 外骨骼手套代替 MANUS 控制 Wuji 二代手的那部分代码，原样整理到这里。
 **只有手的部分**：手套读数 → 重定向 → 发给 Wuji 手的目标，以及手套电机的回零、跟随、力反馈。天机机械臂、PICO、
 DAgger 都不在这里。

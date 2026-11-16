@@ -1,5 +1,40 @@
 # Motorhand_Teleop
 
+## 分支区别与选择
+
+以下名称以本次整理后的远程分支为准；切换分支时，以该分支自己的配置和命令为准。
+
+| 分支 | 定位与目录 | 力反馈和集成方式 | 环境与适用场景 |
+|---|---|---|---|
+| [main](https://github.com/hbw1010/Motorhand_Teleop/tree/main) | 原 `cpp`；核心源码直接位于根目录 `src/motorhand_teleop/` | C++ Wuji 直连、双向跟随、录制回放及接管；接触估计投影为 MIT 纯力矩前馈 | 根目录 Pixi，真机任务用 `-e hardware`；用于查看原生控制基线 |
+| [sim](https://github.com/hbw1010/Motorhand_Teleop/tree/sim) | 原 `sim2.0`；外层 `sim/` 与完整 `Motorhand_FFB/` 并列，各有环境和资产 | 外层为手套与虚拟物体交互；FFB 保留 Wuji 控制、手部 ROS2 适配及其独立仿真 | 分别进入 `sim/` 或 `Motorhand_FFB/`；用于复现整合前的双工程版本 |
+| [sim2.0](https://github.com/hbw1010/Motorhand_Teleop/tree/sim2.0) | 原 `sim3.0`；根目录统一 Pixi，共享驱动、模型，sim/ffb 标定分开 | Wuji 直连默认受阻代理＋MIT 驱动阻抗＋自由空间摩擦补偿；含 G4 支持及遥操监视器 | 从仓库根目录运行任务；用于当前仿真与真机反馈开发 |
+| [tianji_teleop](https://github.com/hbw1010/Motorhand_Teleop/tree/tianji_teleop) | 在原 C++ 基线上增加 `tianji_teleop/` | 天机 ROS2 JointState 话题＋C++ worker；手状态来自天机，配置包含 200 Hz 目标输出 | 需要天机工作区依赖；用于天机系统中的手部接入 |
+
+`sim2.0` 现在指原 `sim3.0` 的代码；整理前叫 `sim2.0` 的版本现在是 `sim`。旧 `main`、`basic_code` 已删除，原 `cpp` 改名为当前默认分支 `main`。提交历史中的旧分支名保留原文。
+
+分支名不代表硬件验收等级。Wuji 电流、软件阻抗和 SDK 名义 Nm 都不能直接解释为实测接触力；设备身份、零位、方向和限额应以当前分支配置为准。
+
+## 本分支：tianji_teleop
+
+本分支保留原 C++ 直连入口，并额外提供天机手部接入层。两条入口的状态来源与配置不同：
+
+| 入口 | Wuji 状态来源 | 参数与用途 |
+|---|---|---|
+| 根目录 `wuji-*` Pixi 任务 | 本仓库直接连接 Wuji SDK | 使用根目录 `config/feedback/`；操作方式见本文后续章节 |
+| `tianji_teleop/` ROS2 节点和 worker | 天机的 `/<side>_hand/joint_states` 及最终目标话题 | 使用 `tianji_teleop/config/`；worker 配置为 200 Hz，依赖天机的 `wuji_hand2`、`tianji_runtime` 和设备配置 |
+
+天机手部接入的构建、话题、follow/force/idle 状态和参数差异见 [天机适配 README](tianji_teleop/README.md)。它与 `sim` 分支内已解耦天机依赖的 `Motorhand_FFB/tianji_teleop/` 不是同一个部署入口。`sim2.0` 只保留历史天机参数，已移除 ROS2 运行器。
+
+在本仓库根目录构建适配 worker：
+
+```bash
+pixi install --frozen
+bash tianji_teleop/scripts/build_motorhand_glove.sh
+```
+
+节点需要部署到对应天机工作区后运行；本仓库构建成功不等于已经具备天机运行依赖。下面的 `wuji-*` 示例属于原有 SDK 直连路径。
+
 12 电机外骨骼手套与 Wuji Hand 2 的双向遥操作、轨迹录制回放和人工力反馈接管。Linux x86-64，Pixi 管理环境；项目同时保留真实设备接口与不连接设备的 MuJoCo/数值验证入口。
 
 ## 控制约定
@@ -13,7 +48,7 @@
 ## 安装与连接
 
 ```bash
-cd /home/boen/hand/Motorhand_Teleop
+# 在本仓库根目录执行
 pixi install -e hardware
 pixi run -e hardware build-control
 pixi run -e hardware wuji-discover
