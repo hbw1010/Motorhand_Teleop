@@ -1,5 +1,13 @@
 ﻿# Encos 12-Axis Dexterous Hand SDK (v0.3.0)
 
+## 本文档范围
+
+所属分支：`sim`。原 sim2.0 的双工程整合版本；外层 sim 与 Motorhand_FFB 使用各自环境，运行目录不能混用。
+
+本文件说明 Encos SDK 的电机读写与原始单位；重定向、受阻判定和反馈规划由上层控制器负责。SDK 示例不等于项目默认启动流程。
+
+[返回仓库首页与分支对照](../../README.md)
+
 ## 1. 快速上手 (Pixi 工作流)
 pixi run test   # 终端自检 12 轴并实时打印物理角度
 pixi run gui    # 启动图形化调试上位机

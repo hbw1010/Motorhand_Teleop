@@ -1,5 +1,13 @@
 # Motorhand_FFB
 
+## 本文档范围
+
+所属分支：`sim`。原 sim2.0 的双工程整合版本；外层 sim 与 Motorhand_FFB 使用各自环境，运行目录不能混用。
+
+本文件负责 Wuji 遥操作和 FFB 子项目；外层 sim/README.md 负责手套与虚拟物体的交互，二者反馈输入和启动命令不同。
+
+[返回仓库首页与分支对照](../README.md)
+
 独立的 Motorhand 外骨骼手套到 Wuji Hand 2 的手部遥操作项目。范围只覆盖手：
 
 - 12 电机手套读取、vE3.3 闭链和 WujiRetarget；
@@ -26,7 +34,8 @@
 Pixi 环境固定使用 PyPI 的 `mujoco==4.0.0`；不要把 conda 的旧版 MuJoCo 混入该环境。
 
 ```bash
-cd /home/boen/hand/Motorhand_FFB
+# 从仓库根目录开始
+cd Motorhand_FFB
 pixi install
 pixi run validate-assets
 bash tianji_teleop/scripts/build_motorhand_glove.sh
@@ -108,7 +117,8 @@ pixi run -e hardware test-control-native
 `sim/` 直接使用 vE3.3 手套闭链 CAD 模型；它不接入 Wuji 手、Wuji SDK 或 WujiRetarget。真实手套输入经过现有标定与闭链求解后，作为 MuJoCo 虚拟手套的电机位置目标。虚拟手套由有限力矩伺服驱动，物体接触会阻挡其运动；接触力在虚拟姿态下通过接触点雅可比和闭链虚功映射到模型电机的名义力矩。
 
 ```bash
-cd /home/boen/hand/Motorhand_FFB
+# 从仓库根目录开始
+cd Motorhand_FFB
 pixi install
 
 # 无硬件：周期性脚本动作、MuJoCo 窗口、本机实时曲线和退出后的 PNG

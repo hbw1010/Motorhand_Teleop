@@ -1,5 +1,13 @@
 # Motorhand 手部力反馈遥操作
 
+## 本文档范围
+
+所属分支：`sim`。原 sim2.0 的双工程整合版本；外层 sim 与 Motorhand_FFB 使用各自环境，运行目录不能混用。
+
+这是已解耦天机 Python 包的独立手部 ROS2 适配层；不同于仓库根目录仍依赖天机工作区的 tianji_teleop/。
+
+[返回仓库首页与分支对照](../../README.md)
+
 这个目录是 `Motorhand_FFB` 的手部适配层：手套读取 → vE3.3 → WujiRetarget → Wuji Hand 2 目标，以及手套回零、手套跟随和接触力反馈。
 
 不包含机械臂、PICO 或 DAgger。项目本身包含 Motorhand 核心、native_control、WujiRetarget 资产和配置，不依赖 `/home/boen/hand/Motorhand_Teleop`。ROS2 节点可直接接入天机的标准 Wuji 手话题，但不依赖天机工作区 Python 包。

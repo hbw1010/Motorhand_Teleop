@@ -1,5 +1,13 @@
 # Motorhand 手套力反馈独立仿真
 
+## 本文档范围
+
+所属分支：`sim`。原 sim2.0 的双工程整合版本；外层 sim 与 Motorhand_FFB 使用各自环境，运行目录不能混用。
+
+本文件负责 glove_sim 手套物体交互；Wuji 真机和其遥测入口见 Motorhand_FFB/README.md。仿真接触力不能用于证明 Wuji 真机反馈已标定。
+
+[返回仓库首页与分支对照](../README.md)
+
 本目录是从 `hbw1010/Motorhand_Teleop` 抽取的手部链路独立工程，**不包含 Wuji 灵巧手、ROS2、PICO、DAgger**。链路为：
 
 ```
@@ -33,7 +41,8 @@
 要求：Linux x86_64、Python 3.12（由 Pixi 管理）、可用的 OpenGL 图形会话（仅 UI 需要）。
 
 ```bash
-cd /home/fcl/hbw/Motorhand_Teleop/sim
+# 从仓库根目录开始
+cd sim
 pixi install --frozen        # 使用 pixi.lock，避免重新求解卡住
 pixi run smoke               # 23 项离线冒烟
 pixi run test                # pytest
@@ -86,7 +95,8 @@ lsusb | grep -i 16d0:117e
 3. 只读检查 12 轴：
 
 ```bash
-cd /home/fcl/hbw/Motorhand_Teleop/sim
+# 从仓库根目录开始
+cd sim
 pixi run check-glove
 ```
 
