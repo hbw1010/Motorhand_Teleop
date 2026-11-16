@@ -1,5 +1,28 @@
 # Motorhand_Teleop
 
+## 分支区别与选择
+
+以下名称以本次整理后的远程分支为准；切换分支时，以该分支自己的配置和命令为准。
+
+| 分支 | 定位与目录 | 力反馈和集成方式 | 环境与适用场景 |
+|---|---|---|---|
+| [main](https://github.com/hbw1010/Motorhand_Teleop/tree/main) | 原 `cpp`；核心源码直接位于根目录 `src/motorhand_teleop/` | C++ Wuji 直连、双向跟随、录制回放及接管；接触估计投影为 MIT 纯力矩前馈 | 根目录 Pixi，真机任务用 `-e hardware`；用于查看原生控制基线 |
+| [sim](https://github.com/hbw1010/Motorhand_Teleop/tree/sim) | 原 `sim2.0`；外层 `sim/` 与完整 `Motorhand_FFB/` 并列，各有环境和资产 | 外层为手套与虚拟物体交互；FFB 保留 Wuji 控制、手部 ROS2 适配及其独立仿真 | 分别进入 `sim/` 或 `Motorhand_FFB/`；用于复现整合前的双工程版本 |
+| [sim2.0](https://github.com/hbw1010/Motorhand_Teleop/tree/sim2.0) | 原 `sim3.0`；根目录统一 Pixi，共享驱动、模型，sim/ffb 标定分开 | Wuji 直连默认受阻代理＋MIT 驱动阻抗＋自由空间摩擦补偿；含 G4 支持及遥操监视器 | 从仓库根目录运行任务；用于当前仿真与真机反馈开发 |
+| [tianji_teleop](https://github.com/hbw1010/Motorhand_Teleop/tree/tianji_teleop) | 在原 C++ 基线上增加 `tianji_teleop/` | 天机 ROS2 JointState 话题＋C++ worker；手状态来自天机，配置包含 200 Hz 目标输出 | 需要天机工作区依赖；用于天机系统中的手部接入 |
+
+`sim2.0` 现在指原 `sim3.0` 的代码；整理前叫 `sim2.0` 的版本现在是 `sim`。旧 `main`、`basic_code` 已删除，原 `cpp` 改名为当前默认分支 `main`。提交历史中的旧分支名保留原文。
+
+分支名不代表硬件验收等级。Wuji 电流、软件阻抗和 SDK 名义 Nm 都不能直接解释为实测接触力；设备身份、零位、方向和限额应以当前分支配置为准。
+
+## 本分支：main
+
+这是原 `cpp` 分支的 C++ 直连控制基线。核心、配置、驱动和模型直接放在仓库根目录，没有外层手套物体交互的 `sim/` 子项目，也没有 `sim2.0` 新增的驱动阻抗规划器和 `teleop-ui`。
+
+本分支 `wuji-force-contact` 使用受阻估计 → 虚拟阻抗 → 几何投影 → MIT `kp=kd=0` 前馈；不能套用 `sim2.0` 的 `--feedback-mode driver-impedance` 参数。真实设备依赖通过 `pixi install -e hardware` 安装，真机任务在根目录用 `pixi run -e hardware ...`。
+
+文档分工：[辅助曲线脚本](scripts/README.md)、[Encos SDK](hardware/encos_dexhand/README.md)、[模型资产](assets/hand_motor_ve33/hand_motor_ve33_R/README.md)。下面保留本分支的直连操作说明。
+
 12 电机外骨骼手套与 Wuji Hand 2 的双向遥操作、轨迹录制回放和人工力反馈接管。Linux x86-64，Pixi 管理环境；项目同时保留真实设备接口与不连接设备的 MuJoCo/数值验证入口。
 
 ## 控制约定
@@ -13,7 +36,7 @@
 ## 安装与连接
 
 ```bash
-cd /home/boen/hand/Motorhand_Teleop
+# 在本仓库根目录执行
 pixi install -e hardware
 pixi run -e hardware build-control
 pixi run -e hardware wuji-discover
