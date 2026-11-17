@@ -5,6 +5,16 @@
 #include <stdexcept>
 namespace motorhand::native::sharpa {
 namespace {
+std::uint64_t steady_ns() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+struct Busy {
+  std::atomic<bool> &busy;
+  explicit Busy(std::atomic<bool> &value) : busy(value) { busy = true; }
+  ~Busy() { busy = false; }
+};
 std::uint64_t seconds(double s) { return static_cast<std::uint64_t>(s * 1e9); }
 void fresh(std::uint64_t stamp, std::uint64_t now) {
   if (!stamp || stamp > now || now - stamp >= hand_timeout_ns)
@@ -50,23 +60,39 @@ Device::~Device() noexcept {
     close();
   } catch (...) {
   }
-  if (watchdog_.joinable()) {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      stop_watchdog_ = true;
-      cv_.notify_all();
-    }
+  stop_watchdog_ = true;
+  cv_.notify_all();
+  if (watchdog_.joinable())
     watchdog_.join();
+  // 未完成的stop worker持有共享运输句柄与串行锁，不能销毁其SDK对象。
+}
+StopStatus Device::stop_status() const noexcept {
+  return {safety_->expired.load(), safety_->pending.load(),
+          safety_->confirmed.load(), safety_->sdk_busy.load()};
+}
+void Device::check_permission() {
+  const auto deadline = safety_->steady_deadline.load();
+  if (deadline && steady_ns() >= deadline) {
+    safety_->expired = true;
+    request_stop();
   }
+  if (safety_->expired)
+    throw std::runtime_error(
+        "Sharpa原始100ms期限已过，发令许可已撤销；停止状态请检查stop_status");
 }
 void Device::ready_locked() {
+  check_permission();
   if (closed_ || !connected_ || faulted_)
     throw std::runtime_error("Sharpa未连接、已关闭或故障锁存");
-  if (active_ && deadline_ns_ && transport_->monotonic_ns() >= deadline_ns_)
+  if (active_ && deadline_ns_ && transport_->monotonic_ns() >= deadline_ns_) {
+    safety_->expired = true;
+    request_stop();
     throw std::runtime_error("Sharpa命令/反馈原始期限已过");
+  }
 }
 void Device::connect() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(*mutex_);
+  Busy busy(safety_->sdk_busy);
   try {
     if (closed_ || faulted_)
       throw std::runtime_error("Sharpa已关闭或故障锁存");
@@ -121,6 +147,7 @@ void Device::connect() {
 HandState<22> Device::read_locked() {
   ready_locked();
   auto p = transport_->state();
+  check_permission();
   auto now = transport_->monotonic_ns();
   auto offset = static_cast<std::int64_t>(transport_->system_ns()) -
                 static_cast<std::int64_t>(now);
@@ -163,9 +190,13 @@ HandState<22> Device::read_locked() {
     throw std::runtime_error("Sharpa重复缓存内容发生变化");
   fresh(received_ns_, now);
   const auto info = transport_->device_info();
+  check_permission();
   verify_identity(info, options_);
   bool enabled = transport_->is_enabled();
-  if (transport_->has_fault())
+  check_permission();
+  const bool fault = transport_->has_fault();
+  check_permission();
+  if (fault)
     throw std::runtime_error("Sharpa SDK报告报警: " +
                              transport_->fault_details());
   if (active_ && !enabled)
@@ -197,7 +228,8 @@ HandState<22> Device::read_locked() {
   return s;
 }
 HandState<22> Device::read() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(*mutex_);
+  Busy busy(safety_->sdk_busy);
   try {
     return read_locked();
   } catch (...) {
@@ -207,23 +239,32 @@ HandState<22> Device::read() {
 }
 void Device::wait_enabled_locked(bool desired) {
   auto end = transport_->monotonic_ns() + seconds(options_.enable_timeout_s);
-  while (transport_->is_enabled() != desired) {
+  while (true) {
+    const bool enabled = transport_->is_enabled();
+    if (desired)
+      check_permission();
+    if (enabled == desired)
+      return;
     if (transport_->monotonic_ns() >= end)
       throw std::runtime_error("Sharpa整手使能确认超时");
     transport_->sleep_ns(10'000'000);
   }
 }
 void Device::arm_locked(std::uint64_t source, const HandState<22> &s) {
+  check_permission();
   auto now = transport_->monotonic_ns();
   fresh(s.received_ns, now);
   if (source <= now)
     throw std::runtime_error("Sharpa原始命令期限已过");
   deadline_ns_ = std::min(
       {source, now + hand_timeout_ns, s.received_ns + hand_timeout_ns});
+  safety_->steady_deadline = steady_ns() + (deadline_ns_ - now);
+  safety_->original_deadline = deadline_ns_;
   cv_.notify_all();
 }
 void Device::enable() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(*mutex_);
+  Busy busy(safety_->sdk_busy);
   try {
     ready_locked();
     if (active_)
@@ -231,12 +272,20 @@ void Device::enable() {
     verify_identity(transport_->device_info(), options_, true);
     if (transport_->is_enabled())
       throw std::runtime_error("Sharpa外部已使能");
-    read_locked();
+    auto initial = read_locked();
+    arm_locked(transport_->monotonic_ns() + hand_timeout_ns, initial);
     owned_ = true;
+    safety_->owned = true;
+    safety_->confirmed = false;
+    check_permission();
     transport_->use_sdk_source();
+    check_permission();
     read_locked();
+    check_permission();
     transport_->use_position_mode();
+    check_permission();
     transport_->set_enabled(true);
+    check_permission();
     wait_enabled_locked(true);
     auto s = read_locked();
     active_ = true;
@@ -248,7 +297,8 @@ void Device::enable() {
   }
 }
 void Device::home(const std::atomic<bool> *stop) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(*mutex_);
+  Busy busy(safety_->sdk_busy);
   try {
     ready_locked();
     if (!active_)
@@ -279,7 +329,9 @@ void Device::home(const std::atomic<bool> *stop) {
         for (int i = 0; i < 22; ++i)
           q[i] = start[i] * (1 - w);
         arm_locked(end, s);
+        check_permission();
         transport_->set_positions(q);
+        check_permission();
         if (transport_->monotonic_ns() >= deadline_ns_)
           throw std::runtime_error("Sharpa回零发送跨越期限");
         if (t >= 1)
@@ -305,7 +357,8 @@ void Device::home(const std::atomic<bool> *stop) {
   }
 }
 void Device::send(const JointArray<22> &q, std::uint64_t source) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(*mutex_);
+  Busy busy(safety_->sdk_busy);
   try {
     ready_locked();
     if (!active_ || !homed_)
@@ -322,7 +375,9 @@ void Device::send(const JointArray<22> &q, std::uint64_t source) {
       output[i] =
           last_target_[i] + std::clamp(q[i] - last_target_[i], -step, step);
     arm_locked(source, s);
+    check_permission();
     transport_->set_positions(output);
+    check_permission();
     if (transport_->monotonic_ns() >= deadline_ns_)
       throw std::runtime_error("Sharpa发送跨越原始期限");
     last_target_ = output;
@@ -336,11 +391,22 @@ void Device::disable_locked() {
   active_ = false;
   homed_ = false;
   deadline_ns_ = 0;
+  safety_->original_deadline = 0;
+  safety_->steady_deadline = 0;
   if (!connected_ || !owned_)
     return;
+  if (!safety_->owned) {
+    owned_ = false;
+    return;
+  }
+  safety_->pending = true;
+  safety_->confirmed = false;
   transport_->set_enabled(false);
   wait_enabled_locked(false);
   owned_ = false;
+  safety_->owned = false;
+  safety_->confirmed = true;
+  safety_->pending = false;
 }
 void Device::fail_locked() {
   faulted_ = true;
@@ -351,7 +417,8 @@ void Device::fail_locked() {
   }
 }
 void Device::disable() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(*mutex_);
+  Busy busy(safety_->sdk_busy);
   try {
     disable_locked();
   } catch (...) {
@@ -361,48 +428,103 @@ void Device::disable() {
 }
 void Device::close() {
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(*mutex_, std::try_to_lock);
+    if (!lock.owns_lock())
+      throw std::runtime_error("Sharpa SDK忙，停止未确认；保留仍在使用的句柄");
+    if (closed_)
+      return;
     stop_watchdog_ = true;
     cv_.notify_all();
   }
   if (watchdog_.joinable())
     watchdog_.join();
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (closed_)
-    return;
-  std::exception_ptr failure;
-  try {
-    disable_locked();
-  } catch (...) {
-    faulted_ = true;
-    failure = std::current_exception();
+  std::unique_lock<std::mutex> lock(*mutex_, std::try_to_lock);
+  if (!lock.owns_lock())
+    throw std::runtime_error("Sharpa SDK忙，停止未确认；保留仍在使用的句柄");
+  Busy busy(safety_->sdk_busy);
+  disable_locked();
+  if (safety_->worker_started && !safety_->worker_done) {
+    lock.unlock();
+    const auto end = steady_ns() + hand_timeout_ns;
+    while (!safety_->worker_done && steady_ns() < end)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if (!safety_->worker_done)
+      throw std::runtime_error("Sharpa停止工作器尚未退出；保留SDK句柄");
+    lock.lock();
+    safety_->sdk_busy = true;
   }
+  if (safety_->pending)
+    throw std::runtime_error("Sharpa停止未确认；禁止销毁SDK句柄");
   if (connected_) {
-    try {
-      transport_->release(options_.serial);
-      connected_ = false;
-    } catch (...) {
-      if (!failure)
-        failure = std::current_exception();
-    }
+    transport_->release(options_.serial);
+    connected_ = false;
   }
-  if (!connected_)
-    closed_ = true;
-  if (failure)
-    std::rethrow_exception(failure);
+  closed_ = true;
+}
+void Device::request_stop() {
+  if (!safety_->owned)
+    return;
+  safety_->pending = true;
+  safety_->confirmed = false;
+  if (!safety_->owned) {
+    safety_->confirmed = true;
+    safety_->pending = false;
+    return;
+  }
+  if (safety_->worker_started.exchange(true))
+    return;
+  auto state = safety_;
+  auto transport = transport_;
+  auto serial = mutex_;
+  std::thread([state, transport, serial] {
+    // SDK并发安全未获官方保证；失能仍通过同一串行通道排队。
+    // 此工作器永不持有Device指针，阻塞时保留运输与串行锁的所有权。
+    while (state->pending) {
+      std::unique_lock<std::mutex> lock(*serial, std::try_to_lock);
+      if (!lock.owns_lock()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        continue;
+      }
+      if (!state->pending || !state->owned) {
+        if (!state->owned) {
+          state->confirmed = true;
+          state->pending = false;
+        }
+        break;
+      }
+      Busy busy(state->sdk_busy);
+      try {
+        transport->set_enabled(false);
+        const auto end = steady_ns() + 2'000'000'000;
+        while (transport->is_enabled()) {
+          if (steady_ns() >= end)
+            throw std::runtime_error("Sharpa失能确认超时");
+          transport->sleep_ns(10'000'000);
+        }
+        state->owned = false;
+        state->confirmed = true;
+        state->pending = false;
+      } catch (...) { /* pending保持true；不能把排队或异常当作失能确认。 */
+      }
+      break;
+    }
+    state->worker_done = true;
+  }).detach();
 }
 void Device::watchdog() {
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(monitor_mutex_);
   while (!stop_watchdog_) {
-    cv_.wait_for(lock, std::chrono::milliseconds(2));
+    cv_.wait_for(lock, std::chrono::milliseconds(1));
     if (stop_watchdog_)
       break;
-    if (active_ && deadline_ns_ && transport_->monotonic_ns() >= deadline_ns_)
-      try {
-        fail_locked();
-      } catch (...) {
-        faulted_ = true;
-      }
+    const auto real = safety_->steady_deadline.load();
+    const auto original = safety_->original_deadline.load();
+    // 实际墙钟监察独立于SDK与业务锁；替身时钟也不能绕过原始期限。
+    if (real && original &&
+        (steady_ns() >= real || transport_->monotonic_ns() >= original)) {
+      safety_->expired = true;
+      request_stop();
+    }
   }
 }
 } // namespace motorhand::native::sharpa

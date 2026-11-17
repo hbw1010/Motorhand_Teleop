@@ -84,6 +84,8 @@ pixi run sharpa-takeover recordings/sharpa-follow.jsonl --serial YOUR_SHARPA_SN 
 
 `takeover`启用手套反馈；回放阶段手套位置跟随，接管阶段由手套主导Sharpa并输出反馈。切换保留既有抓握偏移和平滑接入，原始100ms期限不因回放或切换而延长。
 
+100ms约束的是输入时效和本地继续发令许可。独立监察线程在SDK调用阻塞期间也会撤销许可并标记停止待处理；SDK操作保持串行，阻塞调用返回后先失能，再拒绝后续目标。`Device::stop_status()`区分待处理、已确认和SDK忙；排队不代表硬件已失能。供应商SDK没有可中断调用或已确认的并发控制契约，因此网络/SDK不响应时不承诺100ms内物理失能，也不能把软件停止当成硬急停。
+
 纯离线验证同一流程：
 
 ```bash

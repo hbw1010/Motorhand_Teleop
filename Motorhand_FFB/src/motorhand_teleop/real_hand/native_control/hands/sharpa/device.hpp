@@ -4,6 +4,9 @@
 #include <mutex>
 #include <thread>
 namespace motorhand::native::sharpa {
+struct StopStatus {
+  bool expired{}, pending{}, confirmed{}, sdk_busy{};
+};
 class Device final : public HandDevice<22> {
 public:
   Device(DeviceOptions, HandDescriptor<22>,
@@ -20,6 +23,7 @@ public:
             std::uint64_t original_deadline_ns) override;
   void disable() override;
   void close() override;
+  StopStatus stop_status() const noexcept;
 
 private:
   void ready_locked();
@@ -29,14 +33,24 @@ private:
   void wait_enabled_locked(bool);
   void arm_locked(std::uint64_t, const HandState<22> &);
   void watchdog();
+  void request_stop();
+  void check_permission();
+  struct Safety {
+    std::atomic<std::uint64_t> original_deadline{}, steady_deadline{};
+    std::atomic<bool> expired{}, pending{}, confirmed{}, owned{}, sdk_busy{};
+    std::atomic<bool> worker_started{}, worker_done{};
+  };
   DeviceOptions options_;
   HandDescriptor<22> descriptor_;
-  std::unique_ptr<Transport> transport_;
-  std::mutex mutex_;
+  std::shared_ptr<Transport> transport_;
+  std::shared_ptr<std::mutex> mutex_ = std::make_shared<std::mutex>();
+  std::shared_ptr<Safety> safety_ = std::make_shared<Safety>();
+  std::mutex monitor_mutex_;
   std::condition_variable cv_;
   std::thread watchdog_;
   bool connected_{}, closed_{}, faulted_{}, owned_{}, active_{}, homed_{},
-      stop_watchdog_{}, have_packet_{};
+      have_packet_{};
+  std::atomic<bool> stop_watchdog_{};
   std::int64_t clock_offset_{};
   Packet last_packet_;
   std::uint64_t received_ns_{}, deadline_ns_{}, last_send_ns_{};

@@ -8,7 +8,7 @@
 using namespace motorhand::native;
 using namespace motorhand::native::sharpa;
 namespace {
-struct Fake final : Transport {
+struct Fake : Transport {
   DeviceInfo info{"test-sn", "WaveSE-R-01", "3.0.10", "", false, true};
   Packet packet;
   std::vector<std::string> writes;
@@ -76,6 +76,48 @@ struct Fake final : Transport {
     system += dt;
   }
 };
+struct BlockingFake final : Fake {
+  std::mutex block_mutex;
+  std::condition_variable block_cv;
+  bool block{}, entered{}, released{}, block_query{}, block_disable{};
+  std::atomic<int> disable_requests{}, releases{}, targets{};
+  void wait_blocked() {
+    std::unique_lock<std::mutex> lock(block_mutex);
+    if (block) {
+      entered = true;
+      block_cv.notify_all();
+      block_cv.wait(lock, [&] { return released; });
+    }
+  }
+  Packet state() override {
+    if (!block_query)
+      wait_blocked();
+    return Fake::state();
+  }
+  DeviceInfo device_info() override {
+    if (block_query)
+      wait_blocked();
+    return Fake::device_info();
+  }
+  void set_enabled(bool value) override {
+    if (!value) {
+      if (block_disable)
+        wait_blocked();
+      ++disable_requests;
+      enabled = false;
+    } else
+      Fake::set_enabled(value);
+  }
+  void set_positions(const JointArray<22> &q) override {
+    ++targets;
+    Fake::set_positions(q);
+  }
+  void release(const std::string &sn) override {
+    ++releases;
+    Fake::release(sn);
+  }
+};
+
 HandDescriptor<22> descriptor() {
   HandDescriptor<22> d;
   for (int i = 0; i < 22; ++i) {
@@ -103,6 +145,113 @@ template <class F> void rejects(F fn) {
   }
   assert(caught);
 }
+void blocking_sdk_cannot_hold_deadline_monitor() {
+  for (bool query : {false, true}) {
+    auto t = std::make_unique<BlockingFake>();
+    auto *f = t.get();
+    Device d(options(), descriptor(), std::move(t));
+    d.connect();
+    d.enable();
+    d.home();
+    {
+      std::lock_guard<std::mutex> lock(f->block_mutex);
+      f->block = true;
+      f->block_query = query;
+    }
+    std::atomic<bool> rejected{}, returned{};
+    auto old_targets = f->targets.load();
+    std::thread business([&] {
+      try {
+        JointArray<22> q{};
+        q[21] = .3;
+        d.send(q, f->now + hand_timeout_ns);
+      } catch (const std::exception &) {
+        rejected = true;
+      }
+      returned = true;
+    });
+    {
+      std::unique_lock<std::mutex> lock(f->block_mutex);
+      assert(f->block_cv.wait_for(lock, std::chrono::seconds(1),
+                                  [&] { return f->entered; }));
+    }
+    std::atomic<int> queued_rejected{};
+    std::vector<std::thread> queued;
+    for (int i = 0; i < 2; ++i)
+      queued.emplace_back([&] {
+        try {
+          JointArray<22> q{};
+          d.send(q, f->now + hand_timeout_ns);
+        } catch (const std::exception &) {
+          ++queued_rejected;
+        }
+      });
+    // SDK真实阻塞，未推进替身时钟；监察不得等待业务锁，也不能并发调用SDK。
+    std::this_thread::sleep_for(std::chrono::milliseconds(140));
+    const auto status = d.stop_status();
+    const bool revoked = status.expired && status.pending &&
+                         !status.confirmed && status.sdk_busy;
+    const bool serial_only = f->disable_requests == 0 && f->enabled;
+    const bool still_blocked = !returned;
+    const bool no_release = f->releases == 0;
+    rejects([&] { d.close(); });
+    {
+      std::lock_guard<std::mutex> lock(f->block_mutex);
+      f->released = true;
+      f->block_cv.notify_all();
+    }
+    business.join();
+    for (auto &thread : queued)
+      thread.join();
+    assert(revoked && serial_only && still_blocked && no_release);
+    assert(rejected && queued_rejected == 2);
+    assert(f->targets == old_targets);
+    assert(f->disable_requests > 0 && !f->enabled);
+    const auto stopped = d.stop_status();
+    assert(stopped.expired && stopped.confirmed && !stopped.pending);
+    rejects([&] { d.read(); });
+    d.close();
+    d.close();
+    assert(f->releases == 1);
+  }
+}
+
+void unconfirmed_disable_keeps_live_handle() {
+  auto t = std::make_unique<BlockingFake>();
+  auto *f = t.get();
+  Device d(options(), descriptor(), std::move(t));
+  d.connect();
+  d.enable();
+  {
+    std::lock_guard<std::mutex> lock(f->block_mutex);
+    f->block = true;
+    f->block_disable = true;
+  }
+  f->now += hand_timeout_ns;
+  f->system += hand_timeout_ns;
+  {
+    std::unique_lock<std::mutex> lock(f->block_mutex);
+    assert(f->block_cv.wait_for(lock, std::chrono::seconds(1),
+                                [&] { return f->entered; }));
+  }
+  const auto pending = d.stop_status();
+  assert(pending.expired && pending.pending && !pending.confirmed &&
+         pending.sdk_busy);
+  rejects([&] { d.close(); });
+  assert(f->releases == 0);
+  {
+    std::lock_guard<std::mutex> lock(f->block_mutex);
+    f->released = true;
+    f->block_cv.notify_all();
+  }
+  for (int i = 0; i < 200 && !d.stop_status().confirmed; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  assert(d.stop_status().confirmed);
+  d.close();
+  d.close();
+  assert(f->releases == 1);
+}
+
 void readonly_and_duplicate() {
   auto t = std::make_unique<Fake>();
   auto *f = t.get();
@@ -300,6 +449,8 @@ void read_clock_conversion_preserves_packet_age() {
 
 } // namespace
 int main() {
+  blocking_sdk_cannot_hold_deadline_monitor();
+  unconfirmed_disable_keeps_live_handle();
   fault_message_preserves_sdk_details();
   slow_sdk_query_cannot_return_stale_state();
   watchdog_stops_without_more_calls();
