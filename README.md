@@ -1,5 +1,7 @@
 # Motorhand_Teleop — sim2.0
 
+新增与Wuji并列的Sharpa控制：假手套仿真、真实Motorhand控制虚拟Sharpa、真机SDK关节力矩反馈和回放接管，命令见 [Sharpa控制说明](Motorhand_FFB/docs/SHARPA_CONTROL.md)。
+
 当前仿真与真机力反馈工作区，原分支名 `sim3.0`。包含手套物体交互仿真、Motorhand → Wuji Hand 2 原生遥操作、受阻驱动阻抗和只读监视工具；全部使用仓库根目录的同一个 Pixi 环境。
 
 ## 分支区别与选择

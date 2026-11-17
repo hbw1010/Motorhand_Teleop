@@ -20,6 +20,8 @@ struct ControlOptions {
     // 独立力反馈遥操：两侧各自回零，使用固定的手套零位重定向参考。
     // 推理/回放接管不启用，不改变其保持抓握的过渡语义。
     bool zero_aligned_start = false;
+    // 独立机械手回零，不请求手套输出或改变零位对齐映射。
+    bool home_hand_on_enable = false;
     // 可选取消标志由调用方持有，须活过会话；CLI使用无锁原子信号标志。
     const std::atomic<bool>* stop_requested = nullptr;
     std::uint64_t transition_ns = 500'000'000;

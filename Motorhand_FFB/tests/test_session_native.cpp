@@ -3,6 +3,7 @@
 // production sources and libraries. No physical device API is linked here.
 #include "motorhand_teleop/real_hand/native_control/session.hpp"
 #include "motorhand_teleop/real_hand/native_control/common/session.hpp"
+#include "motorhand_teleop/real_hand/native_control/simulation/fake_glove.hpp"
 #include "motorhand_teleop/real_hand/native_control/common/force_jacobian.hpp"
 #include "motorhand_teleop/real_hand/native_control/trajectory.hpp"
 #include "motorhand_teleop/real_hand/native_control/wuji_device.hpp"
@@ -510,20 +511,20 @@ public:
     HandState<22> read() override {if(!frozen)state.received_ns=now_ns();return state;}
     const HandDescriptor<22>& descriptor() const override{return desc;}
     void enable() override{++enables;state.enabled.fill(true);}
-    void home(const std::atomic<bool>*) override{++homes;}
+    void home(const std::atomic<bool>*) override{check(state.enabled[0],"机械手必须在使能后回零");++homes;}
     void send(const JointArray<22>& q,std::uint64_t until) override{check(now_ns()<until,"22轴输出超过原始期限");last=q;state.position_rad=q;++sends;}
     void disable() override{++disables;state.enabled.fill(false);}
     void close() override{++closes;}
 };
 class FakeModel22 final : public HandModel<22> {
 public:
-    Points points;explicit FakeModel22(Points p):points(p){}
+    Points points;bool delayed_inverse{};explicit FakeModel22(Points p,bool delay=false):points(p),delayed_inverse(delay){}
     JointArray<22> solve(const Points& p) override{JointArray<22> q{};q[20]=.4+p[24];q[21]=-.6+2*p[12];return q;}
-    Points hand_points(const JointArray<22>&) override{return points;}
+    Points hand_points(const JointArray<22>&) override{if(delayed_inverse)std::this_thread::sleep_for(std::chrono::milliseconds(200));return points;}
     std::array<double,21> task_scales() const override{std::array<double,21>s;s.fill(1);return s;}
     void seed(const JointArray<22>&) override{} void reset() override{}
     void set_initial_hint(const JointArray<22>*) override{}
-    std::unique_ptr<HandModel<22>> create_solver(bool=false)const override{return std::make_unique<FakeModel22>(points);}
+    std::unique_ptr<HandModel<22>> create_solver(bool=false)const override{return std::make_unique<FakeModel22>(points,delayed_inverse);}
 };
 
 class FakeFeedback22 final : public HandFeedback<22> {
@@ -577,6 +578,58 @@ void common_async_session22(const Fixture& f) {
 }
 
 // 非空策略并不等于启用反馈：两种手套输出配置都必须能安全接管/恢复。
+void common_measured_overshoot22(const Fixture& f) {
+    for(bool immediate_takeover : {false,true}) {
+        sim.reset({});sim.start();auto o=f.options;o.force_feedback=false;
+        Ve33Model model(o.asset_root,false);auto device=std::make_unique<Fake22>();auto* hand=device.get();
+        JointArray<22> measured{};measured[20]=-2.00004;measured[21]=2.00004;hand->state.position_rad=measured;
+        ControlSession<22> session(o,std::move(device),std::make_unique<FakeModel22>(model.zero().points_m,true));
+        session.connect();session.enable();check(session.read_hand_state().position_rad==measured,"enable不得裁剪实际反馈");
+        if(!immediate_takeover) {
+            const auto waiting=session.step_inference(JointArray<22>{},now_ns());
+            check(!waiting.inverse_fresh,"测试必须覆盖逆解尚未完成的保持路径");
+            check(waiting.hand.position_rad==measured&&waiting.hand_target[20]==-2&&waiting.hand_target[21]==2,
+                  "等待逆解时保持目标须合法，原始反馈不得裁剪");
+            hand->state.position_rad=measured;
+        }
+        session.request_takeover(true);const auto taken=session.step_takeover();
+        check(taken.hand.position_rad==measured&&taken.hand_target[20]==-2&&taken.hand_target[21]==2,
+              "接管锚点须落在限位内，反馈FK输入仍为实际姿态");
+        session.stop();sim.stop();no_expired_commands();
+    }
+}
+
+void common_injected_fake_glove22(const Fixture& f) {
+    sim.reset({});auto o=f.options;o.home_hand_on_enable=true;
+    std::array<EncosMotorCalibration,12> cal{};
+    for(int i=0;i<12;++i)cal[i]={i+1,0,1,1,-180,180,-1,1,10,true};
+    auto injected=std::make_unique<simulation::FakeGlove>(cal);auto* fake=injected.get();
+    Ve33Model model(o.asset_root,false);auto device=std::make_unique<Fake22>();auto* hand=device.get();
+    ControlSession<22> session(o,std::move(device),std::make_unique<FakeModel22>(model.zero().points_m),
+        std::make_unique<FakeFeedback22>(),std::move(injected));
+    session.connect();session.enable();check(hand->homes==1,"注入手套时仍须保留独立机械手回零");
+    {std::lock_guard<std::mutex> lock(sim.mutex);check(!sim.glove_connected&&!sim.glove_homed,"注入手套不能连接或回零真实Encos包装");}
+    Vec12 manual{};manual[4]=.02;fake->set_manual_target(manual);session.request_takeover(true);
+    bool completed=false;auto next=Clock::now();
+    for(int i=0;i<80&&!completed;++i){auto tick=session.step_takeover();
+        completed=tick.force_geometry_valid&&tick.force_commanded&&tick.glove.motor_rad[4]==.02;
+        next+=std::chrono::milliseconds(20);std::this_thread::sleep_until(next);}
+    check(completed&&fake->last_nominal_nm()[0]==.1,"模拟手套须经真实共同Jacobian和输出工作器产生名义反馈");
+    check(fake->read().motor_rad==manual,"名义反馈不能移动模拟人手姿态");
+    session.stop();check(fake->last_nominal_nm()==Vec12{},"会话关闭须卸载模拟手套名义输出");
+    {std::lock_guard<std::mutex> lock(sim.mutex);check(sim.glove_writes.empty()&&sim.glove_close==0,"注入路径不能调用Encos串口边界");}
+}
+
+void common_hand_home_without_glove_output22(const Fixture& f) {
+    sim.reset({});sim.start();auto o=f.options;o.force_feedback=false;o.glove_output=false;o.home_hand_on_enable=true;
+    Ve33Model glove(o.asset_root,false);auto device=std::make_unique<Fake22>();auto* hand=device.get();
+    ControlSession<22> session(o,std::move(device),std::make_unique<FakeModel22>(glove.zero().points_m));
+    session.connect();check(hand->homes==0,"只读连接不能回零机械手");session.enable();
+    check(hand->enables==1&&hand->homes==1,"独立hand-home开关必须在使能后回零机械手");
+    {std::lock_guard<std::mutex> lock(sim.mutex);check(!sim.glove_homed&&!sim.force_enabled&&sim.glove_writes.empty(),"机械手回零不得隐式使能或回零手套");}
+    session.request_takeover(true);session.step_takeover();session.stop();sim.stop();
+}
+
 void common_disabled_feedback22(const Fixture& f) {
     for(bool glove_output : {false,true}) {
         sim.reset({});sim.start();auto o=f.options;o.force_feedback=false;o.glove_output=glove_output;
@@ -621,7 +674,7 @@ void common_session22(const Fixture& f){
 int main(int argc, char** argv) {
     try {
         auto root=argc>1 ? std::filesystem::absolute(argv[1]) : std::filesystem::current_path();
-        Fixture f(root); common_disabled_feedback22(f); common_geometry22(f); common_session22(f); common_async_session22(f); driver_impedance_session(f); zero_aligned_start(f); zero_aligned_saturation(f); replay_takeover_and_resume(f); grasp_handover(f); fault_case(f,true); fault_case(f,false); asynchronous_glove_fault(f); linear_feedback(f);
+        Fixture f(root); common_measured_overshoot22(f); common_injected_fake_glove22(f); common_hand_home_without_glove_output22(f); common_disabled_feedback22(f); common_geometry22(f); common_session22(f); common_async_session22(f); driver_impedance_session(f); zero_aligned_start(f); zero_aligned_saturation(f); replay_takeover_and_resume(f); grasp_handover(f); fault_case(f,true); fault_case(f,false); asynchronous_glove_fault(f); linear_feedback(f);
         std::cout<<"Offline native Session integration passed\n"; return 0;
     } catch (const std::exception& e) {
         sim.stop(); std::cerr<<"Offline native Session integration failed: "<<e.what()<<'\n'; return 1;

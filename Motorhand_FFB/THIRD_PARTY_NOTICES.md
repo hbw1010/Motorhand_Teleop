@@ -1,5 +1,8 @@
 # 第三方与用户提供资产
 
+- `assets/sharpa-hand/`：用户提供的Sharpa模型资源，保留原始`LICENSE.txt`、`NOTICE.txt`和`provenance.json`。本轮新增运行实现位于`native_control/hands/sharpa/`，不从资产来源记录中的其他工程路径导入运行代码。
+- Sharpa Wave SDK 5.0.11：使用用户已有的完整官方资源包，仅安装于本项目忽略的`.cache/hardware-sdk/sharpa/5.0.11`；安装器核验版本/摘要并保留原许可，SDK二进制不纳入Git。官方接口参考用户指定的`dex_glove/real_hand`实现，不重新许可SDK。
+
 - `assets/wuji-hand2/body/`：来自用户提供的 WujiHand2 模型资产。模型和网格的官方来源、版本风险与官方链接见 `docs/research/wujihand2-official.md`；本项目不重新声明其许可证。
 - `../assets/hand_motor_ve33/`：来自用户提供的 vE.3.3 手套模型资产。目录内 `THIRD_PARTY_LICENSE` 记录闭链求解器依赖的 Apache-2.0 来源；各模型目录的 README 记录资产结构与当前验证边界。
 - `src/motorhand_teleop/ve33_kinematics.py`：从当前工作区已有 vE.3.3 运动学实现导入，作为用户提供的内部工程代码使用；其依赖的模型闭链求解器来源和许可见上条资产目录说明。

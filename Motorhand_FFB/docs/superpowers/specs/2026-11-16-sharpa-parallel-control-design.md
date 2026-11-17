@@ -2,7 +2,7 @@
 
 ## 已确认的目标
 
-用户要求在当前 Motorhand 项目中增加 Sharpa，与 Wuji 并列提供仿真遥操、真机遥操力反馈、轨迹回放与人手接管。两台真机已接入现场。用户进一步明确：设备控制代码并列组织；设备特异行为允许分别实现；Sharpa 首版使用 SDK 关节力矩，**不使用触觉**。
+用户要求在当前 Motorhand 项目中增加 Sharpa，与 Wuji 并列提供仿真遥操、真机遥操力反馈、轨迹回放与人手接管。现场连接的是Motorhand手套与Sharpa右手；Wuji未连接，仅做离线兼容回归。用户进一步明确：设备控制代码并列组织；设备特异行为允许分别实现；Sharpa 首版使用 SDK 关节力矩，**不使用触觉**。
 
 本轮基线是 `sim2.0` 的 `8e34ca4`。用户提供的 Sharpa 资产位于 `Motorhand_FFB/assets/sharpa-hand/`。独立开发工作区为 `/home/boen/.codex/worktrees/172f/Motorhand_Teleop_transfer`，分支 `feat/sharpa-parallel-control`；原工作区和已保存版本保留。
 
@@ -12,7 +12,7 @@
 - 本机有用户已有的 Sharpa Wave SDK 5.0.11 完整资源包，包含C++头文件、`libsharpa-wave-sdk.so`和官方示例。使用该版本，不混用另一ABI的Wrapper库。
 - SDK `State`包含`angles`、`velocities`、`torques`、设备时间、序号和`system_clock`主机收包时间；`set_joint_position`使用rad，MIT前馈接口使用Nm。`torques`按SDK报告的关节力矩通道保存，不称为已标定净接触力。
 - SDK `set_control_mode`会隐式使能，必须留在明确的使能流程内，不能用于只读连接。
-- 只读发现已经识别到一只Sharpa右手、型号WaveSE-R-01、固件3.0.10；实际SN由本地设备配置或CLI显式传入，不在日志记录内网地址。Wuji本轮扫描为空，后续独立排查，不能用另一设备代替。
+- 只读发现已经识别到一只Sharpa右手、型号WaveSE-R-01、固件3.0.10；实际SN由本地设备配置或CLI显式传入，不在日志记录内网地址。用户已明确Wuji未连接，本轮仅保留其离线回归。
 - 相邻工程已有Sharpa数值模型和生命周期适配可供理解，但本工程运行时不能导入相邻工程、ROS或依赖其绝对路径。
 - 用户明确指定`/home/boen/hand/dex_glove/real_hand`作为Sharpa控制接口参考。以其中`hands/sharpa_hand.py`的设备身份、源时间、控制权、故障锁存和自身连接释放语义为基准，再适配本项目C++共同控制接口。
 

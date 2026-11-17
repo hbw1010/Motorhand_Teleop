@@ -39,7 +39,7 @@ struct CommonGloveOutputWorker<N>::Impl {
         GlovePose pose{};
         std::optional<CommonJacobianSnapshot<N>> jacobian;
     };
-    EncosDriver& driver;
+    GloveDevice& driver;
     HandFeedback<N>* force;
     CommonDriverImpedancePlanner<N>* impedance;
     std::mutex mutex;
@@ -53,7 +53,7 @@ struct CommonGloveOutputWorker<N>::Impl {
     std::uint64_t next_id = 0;
     bool barrier = false, closing = false, closed = false;
 
-    Impl(EncosDriver& d, HandFeedback<N>* f, CommonDriverImpedancePlanner<N>* p) : driver(d), force(f), impedance(p) {
+    Impl(GloveDevice& d, HandFeedback<N>* f, CommonDriverImpedancePlanner<N>* p) : driver(d), force(f), impedance(p) {
         thread = std::thread([this] { run(); });
     }
 
@@ -203,8 +203,12 @@ struct CommonGloveOutputWorker<N>::Impl {
 };
 
 template<std::size_t N>
-CommonGloveOutputWorker<N>::CommonGloveOutputWorker(EncosDriver& driver, HandFeedback<N>* force, CommonDriverImpedancePlanner<N>* impedance)
+CommonGloveOutputWorker<N>::CommonGloveOutputWorker(GloveDevice& driver, HandFeedback<N>* force, CommonDriverImpedancePlanner<N>* impedance)
     : impl_(std::make_unique<Impl>(driver, force, impedance)) {}
+template<std::size_t N>
+CommonGloveOutputWorker<N>::CommonGloveOutputWorker(EncosDriver& driver, HandFeedback<N>* force, CommonDriverImpedancePlanner<N>* impedance)
+    : compatibility_driver_(std::make_unique<EncosGlove>(driver)),
+      impl_(std::make_unique<Impl>(*compatibility_driver_, force, impedance)) {}
 template<std::size_t N>
 CommonGloveOutputWorker<N>::~CommonGloveOutputWorker() { try { close(); } catch (...) {} }
 

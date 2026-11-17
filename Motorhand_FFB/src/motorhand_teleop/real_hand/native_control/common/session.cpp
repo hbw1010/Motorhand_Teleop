@@ -69,7 +69,7 @@ template<std::size_t N>
 struct ControlSession<N>::Impl {
     ControlOptions options;
     std::unique_ptr<HandDevice<N>> hand;
-    std::unique_ptr<EncosDriver> glove;
+    std::unique_ptr<GloveDevice> glove;
     std::unique_ptr<Ve33Model> model;
     std::unique_ptr<HandModel<N>> retarget;
     std::unique_ptr<CommonInverseWorker<N>> inverse;
@@ -95,8 +95,8 @@ struct ControlSession<N>::Impl {
     std::uint64_t inverse_wait_start = 0, jac_submit_stamp = 0;
 
     Impl(ControlOptions o,std::unique_ptr<HandDevice<N>> device,std::unique_ptr<HandModel<N>> solver,
-         std::unique_ptr<HandFeedback<N>> feedback)
-        : options(std::move(o)),hand(std::move(device)),retarget(std::move(solver)),force(std::move(feedback)) {
+         std::unique_ptr<HandFeedback<N>> feedback,std::unique_ptr<GloveDevice> injected_glove)
+        : options(std::move(o)),hand(std::move(device)),glove(std::move(injected_glove)),retarget(std::move(solver)),force(std::move(feedback)) {
         if(!hand || !retarget || (options.force_feedback && !force))
             throw std::invalid_argument("共同会话缺少设备、模型或反馈策略");
         validate_control_options(options);
@@ -160,10 +160,16 @@ struct ControlSession<N>::Impl {
             if (target[i] < lower[i] || target[i] > upper[i])
                 throw std::invalid_argument("机械手 target exceeds joint limits");
     }
+    JointArray<N> measured_hold(const HandState<N>& frame) const {
+        auto target = frame.position_rad;
+        // 实测姿态允许微量超调；仅投影要发送的锚点，不能改写反馈或反馈FK输入。
+        for (std::size_t i = 0; i < N; ++i) target[i] = std::clamp(target[i], lower[i], upper[i]);
+        return target;
+    }
     void enter_mode(bool takeover, const HandState<N>& hand_frame, const GloveFrame& glove_frame) {
         const bool was_takeover = mode_initialized && mode_takeover;
         mode_takeover = takeover; mode_initialized = true;
-        hand_anchor = has_hand_target ? last_hand_target : hand_frame.position_rad;
+        hand_anchor = has_hand_target ? last_hand_target : measured_hold(hand_frame);
         transition_elapsed = 0; transition_clock = now_ns();
         inverse_result.reset(); inverse_min_id = inverse_last_id; inverse_consumed_id = inverse_min_id;
         inverse_submit_stamp = 0; inverse_was_fresh = false; need_glove_anchor = true; inverse_wait_start = 0;
@@ -196,8 +202,8 @@ struct ControlSession<N>::Impl {
 
 template<std::size_t N>
 ControlSession<N>::ControlSession(ControlOptions options,std::unique_ptr<HandDevice<N>> hand,
-    std::unique_ptr<HandModel<N>> model,std::unique_ptr<HandFeedback<N>> feedback)
-    : impl_(std::make_unique<Impl>(std::move(options),std::move(hand),std::move(model),std::move(feedback))) {}
+    std::unique_ptr<HandModel<N>> model,std::unique_ptr<HandFeedback<N>> feedback,std::unique_ptr<GloveDevice> injected_glove)
+    : impl_(std::make_unique<Impl>(std::move(options),std::move(hand),std::move(model),std::move(feedback),std::move(injected_glove))) {}
 template<std::size_t N>
 ControlSession<N>::~ControlSession() { if (impl_ && !impl_->closed) impl_->cleanup(); }
 template<std::size_t N>
@@ -213,7 +219,7 @@ const HandDescriptor<N>& ControlSession<N>::connect() {
             const auto cfg = json_file(s.options.linear_feedback);
             jac_step = cfg.value("jacobian_step_rad", 0.01);
         }
-        s.glove = std::make_unique<EncosDriver>(s.options.glove_mapping.string(),
+        if(!s.glove) s.glove = std::make_unique<EncosGlove>(s.options.glove_mapping.string(),
             s.options.force_feedback ? s.options.linear_feedback.string() : std::string{});
         const auto cal = s.glove->calibration();
         Vec12 lo{}, hi{};
@@ -277,10 +283,10 @@ void ControlSession<N>::enable() {
         if (s.options.glove_output)
             s.output_worker = std::make_unique<CommonGloveOutputWorker<N>>(*s.glove, s.force.get(), s.impedance.get());
         s.hand_output_started = true; s.hand->enable();
-        if (s.options.zero_aligned_start) s.hand->home(s.options.stop_requested);
+        if (s.options.zero_aligned_start || s.options.home_hand_on_enable) s.hand->home(s.options.stop_requested);
         const auto h = s.read_hand(true); const auto g = s.read_glove();
         s.pose_for(g);
-        s.last_hand_target = h.position_rad; s.has_hand_target = false;
+        s.last_hand_target = s.measured_hold(h); s.has_hand_target = false;
         s.mode_initialized = false; s.enabled = true;
     } catch (...) { s.fail(std::current_exception()); }
 }
@@ -341,7 +347,7 @@ ControlTick<N> ControlSession<N>::step_inference(const JointArray<N>& input, std
         const double alpha = s.hand_blend(now, fresh_inverse && s.inverse_was_fresh);
         s.inverse_was_fresh = fresh_inverse;
         JointArray<N> target = fresh_inverse ? blend(s.hand_anchor, candidate, alpha) :
-            (s.has_hand_target ? s.last_hand_target : h.position_rad);
+            (s.has_hand_target ? s.last_hand_target : s.measured_hold(h));
         s.check_target(target);
         auto until = std::min({deadline(source_ns), deadline(h.received_ns), deadline(g.oldest_ns)});
         std::uint64_t glove_until = until;

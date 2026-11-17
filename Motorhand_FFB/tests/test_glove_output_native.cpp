@@ -70,6 +70,11 @@ namespace motorhand::native {
 struct EncosDriver::Impl {};
 EncosDriver::EncosDriver(const std::string&, const std::string&) : impl_(std::make_unique<Impl>()) {}
 EncosDriver::~EncosDriver() = default;
+void EncosDriver::connect(){throw std::runtime_error("输出测试不应连接驱动");}
+GloveFrame EncosDriver::read(){throw std::runtime_error("输出测试不应读取驱动");}
+std::array<EncosMotorCalibration,12> EncosDriver::calibration()const{throw std::runtime_error("输出测试不应读取校准");}
+void EncosDriver::home(double,double){throw std::runtime_error("输出测试不应回零");}
+void EncosDriver::close(){throw std::runtime_error("输出测试不应关闭借用驱动");}
 Vec12 EncosDriver::write_position(const Vec12& v, std::uint64_t d) { return write_fake(v, d, false); }
 Vec12 EncosDriver::write_torque(const Vec12& v, std::uint64_t d) { return write_fake(v, d, true); }
 DriverImpedanceSubmission EncosDriver::write_impedance(const DriverImpedanceCommand& c, std::uint64_t d) {

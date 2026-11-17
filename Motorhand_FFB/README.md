@@ -1,5 +1,7 @@
 # Motorhand_FFB
 
+Sharpa并列入口、仿真、SDK关节力矩反馈及回放接管见 [Sharpa控制说明](docs/SHARPA_CONTROL.md)。Wuji与Sharpa设备逻辑分开放在`native_control/hands/`，共用`native_control/common/`的控制会话。
+
 ## 本文档范围
 
 所属分支：`sim2.0`。原 sim3.0 的统一工作区；Pixi 任务从仓库根目录运行，sim/ffb 标定分别管理。

@@ -124,8 +124,17 @@ void constraints(unsigned, double* result, unsigned, const double* q,
     for (unsigned motor = 0; motor < kJoints; ++motor) {
         const double value = eval.pose.motor_rad[motor];
         // NLopt's inequality convention is constraint <= 0.
-        result[motor] = eval.motor_bounds[motor][0] - value;
-        result[kJoints + motor] = value - eval.motor_bounds[motor][1];
+        // 闭链计算在精确电机边界可产生约1e-15rad残差。SLSQP会把这类
+        // 舍入误差当作活动约束违约，并在重合边界反复roundoff失败。
+        // 仅归零机器精度量级的残差；最终电机限位仍精确投影/严格检查。
+        const double roundoff = 64.0 * std::numeric_limits<double>::epsilon() *
+            std::max({1.0, std::abs(value), std::abs(eval.motor_bounds[motor][0]),
+                      std::abs(eval.motor_bounds[motor][1])});
+        const auto clean = [roundoff](double residual) {
+            return std::abs(residual) <= roundoff ? 0.0 : residual;
+        };
+        result[motor] = clean(eval.motor_bounds[motor][0] - value);
+        result[kJoints + motor] = clean(value - eval.motor_bounds[motor][1]);
         if (gradient) {
             for (unsigned col = 0; col < kJoints; ++col) {
                 const double derivative = eval.pose.motor_jacobian[motor * kJoints + col];

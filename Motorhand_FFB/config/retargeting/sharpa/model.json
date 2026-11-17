@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "units": "metres_radians",
+  "canonical_axes": "+X屈曲方向，+Y右手食指侧（左手符号镜像），+Z掌长；Sharpa URDF坐标直接对应vE3.3 canonical",
+  "position_scale": 1.42,
+  "direction_weight": 1.0,
+  "position_weight": 0.15,
+  "temporal_weight": 0.00001,
+  "fixed_joint_suffixes": ["thumb_MCP_AA", "index_MCP_AA", "middle_MCP_AA", "ring_MCP_AA", "pinky_CMC", "pinky_MCP_AA"],
+  "fixed_joint_value_rad": 0.0,
+  "max_evaluations": 80,
+  "differentiation_max_evaluations": 200,
+  "note": "四指侧摆及额外拇指MCP侧摆、小指CMC缺少独立手套观测，首版固定零；实际反馈FK保留全部22轴。统一固定长度比例适用于正逆任务，不使用每帧动态缩放。"
+}

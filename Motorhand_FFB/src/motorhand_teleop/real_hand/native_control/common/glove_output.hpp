@@ -1,5 +1,6 @@
 #pragma once
 #include "common/hand.hpp"
+#include "common/glove_device.hpp"
 
 #include "common/feedback.hpp"
 #include "common/jacobian_worker.hpp"
@@ -36,6 +37,7 @@ template<std::size_t N> struct CommonGloveOutputResult {
 // request is retained; errors latch. Every request keeps its original deadline.
 template<std::size_t N> class CommonGloveOutputWorker {
 public:
+    CommonGloveOutputWorker(GloveDevice& driver, HandFeedback<N>* force, CommonDriverImpedancePlanner<N>* impedance = nullptr);
     CommonGloveOutputWorker(EncosDriver& driver, HandFeedback<N>* force, CommonDriverImpedancePlanner<N>* impedance = nullptr);
     ~CommonGloveOutputWorker();
     CommonGloveOutputWorker(const CommonGloveOutputWorker<N>&) = delete;
@@ -57,6 +59,7 @@ public:
     void close(); // Joins, reports worker errors; driver disable/close remains caller-owned.
 private:
     struct Impl;
+    std::unique_ptr<GloveDevice> compatibility_driver_;
     std::unique_ptr<Impl> impl_;
 };
 } // namespace motorhand::native

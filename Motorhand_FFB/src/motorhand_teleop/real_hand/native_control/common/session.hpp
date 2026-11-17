@@ -1,6 +1,7 @@
 #pragma once
 #include "common/session_options.hpp"
 #include "common/hand.hpp"
+#include "common/glove_device.hpp"
 #include "common/feedback.hpp"
 namespace motorhand::native {
 template<std::size_t N> struct ControlTick {
@@ -47,7 +48,8 @@ template<std::size_t N> struct ControlTick {
 template<std::size_t N> class ControlSession {
 public:
     ControlSession(ControlOptions,std::unique_ptr<HandDevice<N>>,std::unique_ptr<HandModel<N>>,
-                   std::unique_ptr<HandFeedback<N>> feedback=nullptr);
+                   std::unique_ptr<HandFeedback<N>> feedback=nullptr,
+                   std::unique_ptr<GloveDevice> injected_glove={});
     ~ControlSession();
     ControlSession(const ControlSession&)=delete;
     ControlSession& operator=(const ControlSession&)=delete;

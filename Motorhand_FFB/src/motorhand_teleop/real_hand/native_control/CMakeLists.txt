@@ -27,6 +27,7 @@ add_library(motorhand_native_core STATIC
   playback_control.cpp
   hands/wuji/session.cpp
   common/session.cpp
+  simulation/fake_glove.cpp
   telemetry.cpp
   trajectory.cpp
   ve33_model.cpp
@@ -77,6 +78,10 @@ set_target_properties(inference_bridge PROPERTIES BUILD_RPATH "${WUJI_SDK_ROOT}/
 
 option(MOTORHAND_NATIVE_TESTS "Build offline native control regression tests" OFF)
 if(MOTORHAND_NATIVE_TESTS)
+  add_executable(fake_glove_native_test "${PROJECT_ROOT}/tests/test_fake_glove_native.cpp" simulation/fake_glove.cpp)
+  target_include_directories(fake_glove_native_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_link_libraries(fake_glove_native_test PRIVATE Threads::Threads)
+  add_test(NAME fake_glove_native_test COMMAND fake_glove_native_test)
   add_executable(hand_contract_native_test "${PROJECT_ROOT}/tests/test_hand_contract_native.cpp")
   target_include_directories(hand_contract_native_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
   add_test(NAME hand_contract_native_test COMMAND hand_contract_native_test)
