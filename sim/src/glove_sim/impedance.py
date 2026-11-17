@@ -15,9 +15,10 @@ The driver PD is two-sided and has no torque cap, so the plan
 
 * clamps the target so k*|target - q| never exceeds the torque limit (the
   spring "slides" with the finger beyond that, like a saturated god-object);
-* releases (kp = 0) one command period *before* the finger would cross back
-  out of the surface, so the PD never pulls a retreating finger back in;
-* applies damping only while the finger is still pressing in.
+* softens rebound continuously while the finger remains inside the surface,
+  and releases when the measured position reaches or leaves that surface;
+* bounds withdrawal damping by the remaining spring force at the predicted
+  position, so the nominal total does not pull inward over that horizon.
 
 All quantities are in model-joint coordinates (closing = +); the SDK converts
 to motor axes.  Hardware facts behind the defaults (measured 2026-11-10, glove
@@ -108,11 +109,8 @@ class DriverImpedancePlanner:
         self.k_max = _vec(cfg.get("k_max_nm_per_rad", 80.0))
         self.lookahead_s = float(cfg.get("release_lookahead_s", 0.02))
         self.margin = float(cfg.get("torque_margin", 0.85))
-        # "soften" (default): on rebound the push is reduced by k*|v|*lookahead
-        # (continuous, never pulls, dissipates rebound energy).  "release":
-        # legacy hard kp=0 before the predicted crossing -- it is triggered by
-        # the spring's own rebound and caused a push/release limit cycle at
-        # contact (reproduced on J4: 53 toggles/3 s at kp 60).
+        # "soften": reduce gain continuously and place the target outside the
+        # predicted retreat. "release" retains the legacy early hard release.
         self.rebound = str(cfg.get("rebound_mode", "soften"))
         # Damping stays on in contact (both directions) and switches off only
         # for a clear withdrawal, with hysteresis so it cannot chatter.
@@ -143,26 +141,28 @@ class DriverImpedancePlanner:
                 self._damping_on[i] = False
                 out.append(free)
                 continue
-            if self.rebound == "release" and press_vel < 0.0 and depth < -press_vel * self.lookahead_s:
+            cap = self.margin * float(self.limit[i])
+            reach = min(depth, cap / k)
+            if reach <= 0.0:
                 self._damping_on[i] = False
                 out.append(free)
                 continue
-            cap = self.margin * float(self.limit[i])
-            # Saturated spring: the PD target never sits more than cap/k away.
-            reach = min(depth, cap / k)
-            if self.rebound != "release" and press_vel < 0.0:
-                # Moving out: the next frame lands up to ~lookahead later, so
-                # aim the spring that much further out.  The push shrinks
-                # continuously to 0 at the predicted crossing -- no pull-back,
-                # no on/off switching, and less push on the way out than on
-                # the way in (rebound energy is dissipated).
-                reach = reach + press_vel * self.lookahead_s
-                if reach <= 0.0:
-                    # Push already 0: drop kp now, otherwise a PD pinned at the
-                    # current angle would pull the withdrawing finger back.
-                    self._damping_on[i] = False
-                    out.append(free)
-                    continue
+            withdrawal = max(0.0, -press_vel)
+            travel = withdrawal * max(0.0, self.lookahead_s)
+            predicted_reach = reach - travel
+            if self.rebound != "release" and withdrawal > 0.0:
+                # r = capped depth, s = predicted retreat. The spring force is
+                # k*r*r/(r+s): continuous and <= k*r, without a zero crossing.
+                # Moving the target out by s leaves r of spring travel at the
+                # predicted position, instead of moving the target inward.
+                softened_reach = reach + travel
+                k *= (reach / softened_reach) ** 2
+                predicted_reach = reach
+                reach = softened_reach
+            elif predicted_reach <= 0.0:
+                self._damping_on[i] = False
+                out.append(free)
+                continue
             target = float(q[i] - sign * reach)
             if self._damping_on[i]:
                 if press_vel < -self.damp_off_vel:
@@ -170,6 +170,10 @@ class DriverImpedancePlanner:
             elif press_vel > -self.damp_on_vel:
                 self._damping_on[i] = True
             b = min(self.damping_max, self.damping_s * k) if self._damping_on[i] else 0.0
+            if withdrawal > 0.0:
+                # Check spring + damping, including the lookahead position.
+                # Merely checking the spring misses inward damping on rebound.
+                b = min(b, k * predicted_reach / withdrawal)
             out.append(ImpedanceCommand(target_rad=target, k=k, b=b))
         return out
 

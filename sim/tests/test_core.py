@@ -592,16 +592,16 @@ def test_driver_impedance_rebound_is_smooth_damped_and_never_pulls():
     dq[5] = +0.5  # pressing in -> spring + damping
     cmd = planner.plan(q, dq, {5: (1, 0.30, 40.0)})[5]
     assert cmd.k == pytest.approx(40.0) and cmd.b == pytest.approx(0.32)
-    assert cmd.torque(q[5]) == pytest.approx(-0.4)
-    # Rebound at 0.1 rad/s: push shrinks smoothly (10 -> 8 mrad), damping stays on.
+    assert cmd.torque(q[5], dq[5]) == pytest.approx(-0.56)
+    # 回撤时平滑降低刚度，验证弹簧与阻尼的合力。
     dq[5] = -0.1
     cmd = planner.plan(q, dq, {5: (1, 0.30, 40.0)})[5]
-    assert cmd.torque(q[5]) == pytest.approx(-0.32) and cmd.b > 0.0
-    # Fast withdrawal: damping switches off (hysteresis) and the push reaches
-    # 0 -> kp dropped, so the PD can never pull the finger back in.
+    assert cmd.torque(q[5], dq[5]) == pytest.approx(-0.3111111111) and cmd.b > 0.0
+    # 快速回撤时继续变软；位置实际离开接触面时才撤去阻抗。
     dq[5] = -0.6
     cmd = planner.plan(q, dq, {5: (1, 0.30, 40.0)})[5]
-    assert cmd.k == 0.0 and cmd.b == 0.0
+    assert 0.0 < cmd.k < 40.0 and cmd.b == 0.0
+    assert cmd.torque(q[5], dq[5]) == pytest.approx(-0.1818181818)
     # Damping only re-arms once the finger stops withdrawing (no chatter at 0).
     dq[5] = -0.1
     q[5] = 0.33
@@ -613,7 +613,9 @@ def test_driver_impedance_rebound_is_smooth_damped_and_never_pulls():
     taus = []
     for v in np.linspace(0.0, -0.4, 41):
         dq[5] = v
-        taus.append(planner.plan(q, dq, {5: (1, 0.30, 40.0)})[5].torque(q[5]))
+        cmd = planner.plan(q, dq, {5: (1, 0.30, 40.0)})[5]
+        taus.append(cmd.torque(q[5], dq[5]))
+        assert cmd.torque(q[5] + dq[5] * 0.02, dq[5]) <= 1e-12
     assert max(abs(a - b) for a, b in zip(taus, taus[1:])) < 0.05
     assert all(t <= 0.0 for t in taus)  # never pulls inward
     # Opposite closing sign (sign -1 motor): pushing toward larger angles.
@@ -892,8 +894,8 @@ def test_real_glove_rejects_stale_feedback(setup):
     assert glove.read().source == "real"
 
 
-def test_j1_gets_more_contact_stiffness_and_torque():
-    """J1 (thumb CMC) has its own stiffness multiplier, kp ceiling and torque limit."""
+def test_j1_keeps_higher_stiffness_with_shared_torque_limit():
+    """统一力矩限额后，J1 保留独立刚度倍率与刚度上限。"""
     from glove_sim.impedance import DriverImpedancePlanner
 
     config = load_config(None)
@@ -905,9 +907,9 @@ def test_j1_gets_more_contact_stiffness_and_torque():
     cmds = planner.plan(q, dq, blocked)
     j1, j5 = cmds[0], cmds[4]
     assert j1.k == pytest.approx(40.0 * 1.5) and j5.k == pytest.approx(40.0)
-    # Saturated push: J1 cap 0.85 * 6 Nm, J5 cap 0.85 * 4 Nm.
-    assert abs(j1.torque(q[0])) == pytest.approx(0.85 * 6.0)
-    assert abs(j5.torque(q[4])) == pytest.approx(0.85 * 4.0)
+    # 两轴弹簧均饱和于 10 Nm × 0.85，刚度差异不应改变限额。
+    assert abs(j1.torque(q[0])) == pytest.approx(8.5)
+    assert abs(j5.torque(q[4])) == pytest.approx(8.5)
     # Hardest object: J1 kp stops at its own ceiling.
     cmds = planner.plan(q, dq, {0: (1, 0.2, 80.0)})
     assert cmds[0].k == pytest.approx(100.0)

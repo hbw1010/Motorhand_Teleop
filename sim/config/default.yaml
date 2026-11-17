@@ -72,10 +72,9 @@ glove:
     - pinky_pip
   kp_nm_rad: 3.0
   kd_nm_s_rad: 0.8
-  # J1 (thumb CMC flexion) sits at the thumb root with the longest lever to
-  # the contact, so it needs more torque than the others (user request
-  # 2026-11-10): 4.0 -> 6.0 Nm.  Nominal SDK Nm, not a calibrated output.
-  torque_limit_nm: [6.0, 2.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0]
+  # 2026-11-16 按用户要求，12 轴名义 SDK 力矩上限统一为 10 Nm。
+  # 位置阻抗弹簧上限 = 0.85 * 配置上限；此值不是实测力矩或驱动器硬上限。
+  torque_limit_nm: [10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]
   slew_nm_s: 60.0
   # Feedback model.
   #   proxy_spring (default): joint-space virtual spring.  When the real

@@ -8,3 +8,7 @@
 - 原 `HandSnapshot` 布局（88字节）、`GetSnapshots()`、网关协议及Python shim/C ABI保持兼容。原生控制使用新的快照接口；现有Python调用无需新增参数。
 
 离线测试：`Motorhand_FFB/tests/test_encos_gateway_snapshot_native.cpp`。没有为验证此扩展打开真实串口或启动电机。
+
+2026-11-16：共享 Python C ABI 包装层 `../shim/g4_shim.cpp` 改为直接使用 `GetTimedSnapshots()` 的位置接收时间（微秒转纳秒），保持 `G4Joint` 布局及 Python 调用参数不变。原实现依赖连接后启动的 watchdog 补写时间戳，可能在已有 12 轴反馈时仍返回零时间戳，导致标零和只读检查偶发全轴离线。
+
+离线回归：`sim/tests/test_g4_snapshot.py` 使用伪终端运行实际 SDK，在 watchdog 未启动的情况下验证首批反馈时间戳、时钟来源及断流过期行为。此修复保留指令期限 watchdog、软释放及电机控制报文。

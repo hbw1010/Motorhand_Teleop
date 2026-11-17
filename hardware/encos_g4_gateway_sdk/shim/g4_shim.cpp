@@ -1,13 +1,9 @@
 // 厂商SDK的C ABI包装（vendor/include/HandClientG4.hpp）；时间快照扩展见vendor/LOCAL_CHANGES.md。
 // for "驱动 2" (STM32G4 LQS-GW02 gateway).  Loaded from Python with ctypes.
 //
-// Only adds things *above* the SDK:
-//  * command deadline watchdog: when the controller stops refreshing a
-//    command, the joint gets the SDK's zero-gain MIT command (same as the
-//    vendor release frame) and then DisableJoint, instead of the SDK
-//    re-sending a stale MIT target forever;
-//  * a host receive timestamp per joint, taken when the SDK's sample counter
-//    advances（保留此旧C ABI路径的消费时间语义；原生阻抗使用SDK的GetTimedSnapshots真实解析时间）。
+// 在 SDK 之上保留指令期限 watchdog：控制器停止刷新指令时，先发送
+// 零增益 MIT 卸力帧，再 DisableJoint，避免 SDK 持续发送过期目标。
+// 位置与接收时间一起取自 SDK 的 GetTimedSnapshots，不依赖 watchdog 调度。
 #include "HandClientG4.hpp"
 
 #include <time.h>
@@ -30,16 +26,10 @@ struct Pending {
     int64_t disable_at_ns = 0;     // >0: limp MIT sent, DisableJoint at this time
 };
 
-struct Seen {
-    uint64_t samples = 0;
-    int64_t received_ns = 0;
-};
-
 struct Shim {
     lqs::HandClientG4 client;
     std::mutex mutex;
     std::map<lqs::JointKey, Pending> pending;
-    std::map<lqs::JointKey, Seen> seen;
     std::atomic<bool> running{false};
     std::thread watchdog;
     uint64_t releases = 0;
@@ -61,13 +51,6 @@ struct Shim {
                     if (p.disable_at_ns && now >= p.disable_at_ns) {
                         client.DisableJoint(k.bus, k.id);
                         p.disable_at_ns = 0;
-                    }
-                }
-                for (const auto& [k, s] : client.GetSnapshots()) {
-                    auto& entry = seen[k];
-                    if (s.samples != entry.samples) {
-                        entry.samples = s.samples;
-                        entry.received_ns = now;
                     }
                 }
             }
@@ -127,17 +110,16 @@ void g4_release(void* h, uint32_t bus, uint32_t id) {
 
 int g4_snapshots(void* h, G4Joint* out, int capacity) {
     auto* shim = static_cast<Shim*>(h);
-    const auto snaps = shim->client.GetSnapshots();
-    std::lock_guard<std::mutex> lock(shim->mutex);
+    const auto snaps = shim->client.GetTimedSnapshots();
     int n = 0;
-    for (const auto& [k, s] : snaps) {
+    for (const auto& [k, timed] : snaps) {
         if (n >= capacity) break;
+        const auto& s = timed.state;
         G4Joint& j = out[n++];
         j.bus = s.bus; j.id = s.id; j.valid = s.valid; j.error = s.error;
         j.angle_deg = s.angle_deg; j.current_a = s.current_a; j.temp_c = s.temp_c;
         j.speed_rpm = s.speed_rpm; j.hz = s.hz; j.samples = s.samples;
-        auto it = shim->seen.find(k);
-        j.received_ns = (it != shim->seen.end() && s.samples) ? it->second.received_ns : 0;
+        j.received_ns = int64_t(timed.position_received_us) * 1000;
         j.board_timestamp_us = s.board_timestamp_us; j.max_board_gap_us = s.max_board_gap_us;
         j.max_host_gap_us = s.max_host_gap_us; j.tx_failures = s.tx_failures;
     }
