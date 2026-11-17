@@ -528,11 +528,13 @@ public:
 
 class FakeFeedback22 final : public HandFeedback<22> {
 public:
+    std::atomic<int> calls{0};
     void set_motor_limits(const Vec12&,const Vec12&) override{}
     void reset(std::uint64_t) override{}
     void acknowledge_torque(const Vec12&) override{}
     FeedbackResult<22> step(const JointArray<22>&,const HandState<22>& hand,const GloveFrame&,const GlovePose&,
         const RetargetJacobian<22>& jac,const Vec12&,std::uint64_t source,std::uint64_t) override {
+        ++calls;
         check(hand.load_unit==HandLoadUnit::newton_metre&&hand.load_source=="fake-torque","22轴负载单位/来源丢失");
         FeedbackResult<22> out;out.active=source!=0;out.contact[21]=out.active;
         out.virtual_hand_nm[21]=out.active?-.3:0;out.projection_load=hand.load;
@@ -574,6 +576,29 @@ void common_async_session22(const Fixture& f) {
     session.request_takeover(false);session.step_inference(command,now_ns());session.stop();sim.stop();no_expired_commands();
 }
 
+// 非空策略并不等于启用反馈：两种手套输出配置都必须能安全接管/恢复。
+void common_disabled_feedback22(const Fixture& f) {
+    for(bool glove_output : {false,true}) {
+        sim.reset({});sim.start();auto o=f.options;o.force_feedback=false;o.glove_output=glove_output;
+        Ve33Model glove(o.asset_root,false);auto device=std::make_unique<Fake22>();auto* hand=device.get();
+        auto feedback=std::make_unique<FakeFeedback22>();auto* strategy=feedback.get();
+        ControlSession<22> session(o,std::move(device),std::make_unique<FakeModel22>(glove.zero().points_m),std::move(feedback));
+        session.connect();session.enable();session.request_takeover(true);
+        for(int i=0;i<3;++i) {
+            const auto tick=session.step_takeover();
+            check(tick.takeover&&!tick.force_commanded&&!tick.force_geometry_valid,"禁用反馈时接管不得发布反馈输出");
+        }
+        check(hand->sends==3&&strategy->calls==0,"禁用反馈的非空策略不能影响机械手跟随或被调用");
+        session.request_takeover(false);session.step_inference(hand->last,now_ns());
+        session.request_takeover(true);session.step_takeover();
+        check(strategy->calls==0,"模式往返后仍须遵守反馈关闭选项");
+        session.stop();sim.stop();no_expired_commands();
+        std::lock_guard<std::mutex> lock(sim.mutex);
+        check(std::none_of(sim.glove_writes.begin(),sim.glove_writes.end(),[](const auto& write){return write.force;}),
+              "反馈关闭时不得写入手套力矩");
+    }
+}
+
 void common_session22(const Fixture& f){
     sim.reset({});sim.start();auto o=f.options;o.force_feedback=false;o.glove_output=false;o.transition_ns=1;
     Ve33Model glove(o.asset_root,false);auto device=std::make_unique<Fake22>();auto* hand=device.get();
@@ -596,7 +621,7 @@ void common_session22(const Fixture& f){
 int main(int argc, char** argv) {
     try {
         auto root=argc>1 ? std::filesystem::absolute(argv[1]) : std::filesystem::current_path();
-        Fixture f(root); common_geometry22(f); common_session22(f); common_async_session22(f); driver_impedance_session(f); zero_aligned_start(f); zero_aligned_saturation(f); replay_takeover_and_resume(f); grasp_handover(f); fault_case(f,true); fault_case(f,false); asynchronous_glove_fault(f); linear_feedback(f);
+        Fixture f(root); common_disabled_feedback22(f); common_geometry22(f); common_session22(f); common_async_session22(f); driver_impedance_session(f); zero_aligned_start(f); zero_aligned_saturation(f); replay_takeover_and_resume(f); grasp_handover(f); fault_case(f,true); fault_case(f,false); asynchronous_glove_fault(f); linear_feedback(f);
         std::cout<<"Offline native Session integration passed\n"; return 0;
     } catch (const std::exception& e) {
         sim.stop(); std::cerr<<"Offline native Session integration failed: "<<e.what()<<'\n'; return 1;

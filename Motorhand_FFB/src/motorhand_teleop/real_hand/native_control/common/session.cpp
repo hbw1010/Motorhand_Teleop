@@ -441,7 +441,7 @@ ControlTick<N> ControlSession<N>::step_takeover() {
         s.hand->send(target, until);
         const auto hand_submit = now_ns();
         s.last_hand_target = target; s.has_hand_target = true;
-        if (s.force) {
+        if (s.options.force_feedback) {
             require_deadline(until);
             auto effective_jacobian = s.jacobian_result;
             if (s.options.zero_aligned_start && effective_jacobian) {
