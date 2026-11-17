@@ -1,7 +1,7 @@
-#include "inverse_worker.hpp"
+#include "common/inverse_worker.hpp"
 
 #include "ve33_model.hpp"
-#include "wuji_retarget.hpp"
+#include "common/hand.hpp"
 
 #include <limits>
 #include <stdexcept>
@@ -9,14 +9,16 @@
 
 namespace motorhand::native {
 
-InverseWorker::InverseWorker(std::filesystem::path glove_asset_root,
-                             std::filesystem::path hand_yaml_path, bool left,
+template<std::size_t N>
+CommonInverseWorker<N>::CommonInverseWorker(std::filesystem::path glove_asset_root,
+                             HandModelFactory<N> hand_factory, bool left,
                              std::array<std::array<double, 2>, 12> motor_bounds)
     : glove_asset_root_(std::move(glove_asset_root)),
-      hand_yaml_path_(std::move(hand_yaml_path)), left_(left),
-      motor_bounds_(motor_bounds), thread_(&InverseWorker::run, this) {}
+      hand_factory_(std::move(hand_factory)), left_(left),
+      motor_bounds_(motor_bounds), thread_(&CommonInverseWorker<N>::run, this) {}
 
-InverseWorker::~InverseWorker() {
+template<std::size_t N>
+CommonInverseWorker<N>::~CommonInverseWorker() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         stopping_ = true;
@@ -26,7 +28,8 @@ InverseWorker::~InverseWorker() {
     if (thread_.joinable()) thread_.join();
 }
 
-std::uint64_t InverseWorker::submit(const HandFrame& hand, const GlovePose& seed,
+template<std::size_t N>
+std::uint64_t CommonInverseWorker<N>::submit(const HandState<N>& hand, const GlovePose& seed,
                                     std::uint64_t source_ns) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (initialization_error_) std::rethrow_exception(initialization_error_);
@@ -39,7 +42,8 @@ std::uint64_t InverseWorker::submit(const HandFrame& hand, const GlovePose& seed
     return id;
 }
 
-std::optional<InverseWorkerResult> InverseWorker::poll() {
+template<std::size_t N>
+std::optional<InverseWorkerResult> CommonInverseWorker<N>::poll() {
     Completion completion;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -55,13 +59,14 @@ std::optional<InverseWorkerResult> InverseWorker::poll() {
     return std::move(completion.value);
 }
 
-void InverseWorker::run() noexcept {
+template<std::size_t N>
+void CommonInverseWorker<N>::run() noexcept {
     try {
         // Construction and all model access happen on this thread alone. No
         // initialization or warmup pose is ever published as feedback.
         Ve33Model glove(glove_asset_root_, left_);
-        WujiRetarget hand(hand_yaml_path_, left_);
-        InverseRetarget inverse(glove, hand, motor_bounds_);
+        auto hand=hand_factory_();
+        CommonInverseRetarget<N> inverse(glove, *hand, motor_bounds_);
         for (;;) {
             std::optional<Request> request;
             {
@@ -98,4 +103,6 @@ void InverseWorker::run() noexcept {
     }
 }
 
+template class CommonInverseWorker<20>;
+template class CommonInverseWorker<22>;
 }  // namespace motorhand::native

@@ -16,26 +16,27 @@ find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
 add_library(motorhand_native_core STATIC
-  driver_impedance.cpp
-  force_controller.cpp
-  force_jacobian.cpp
-  glove_output.cpp
-  inverse_retarget.cpp
-  inverse_worker.cpp
-  jacobian_worker.cpp
-  linear_force.cpp
+  common/driver_impedance.cpp
+  hands/wuji/force_controller.cpp
+  common/force_jacobian.cpp
+  common/glove_output.cpp
+  common/inverse_retarget.cpp
+  common/inverse_worker.cpp
+  common/jacobian_worker.cpp
+  hands/wuji/linear_force.cpp
   playback_control.cpp
-  session.cpp
+  hands/wuji/session.cpp
+  common/session.cpp
   telemetry.cpp
   trajectory.cpp
   ve33_model.cpp
-  wuji_retarget.cpp)
+  hands/wuji/wuji_retarget.cpp)
 target_include_directories(motorhand_native_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(motorhand_native_core PUBLIC
   Eigen3::Eigen NLopt::nlopt pinocchio::pinocchio_default pinocchio::pinocchio_parsers
   tinyxml2::tinyxml2 yaml-cpp::yaml-cpp nlohmann_json::nlohmann_json OpenSSL::Crypto Threads::Threads)
 
-add_library(motorhand_native_hardware STATIC encos_driver.cpp wuji_device.cpp)
+add_library(motorhand_native_hardware STATIC encos_driver.cpp hands/wuji/wuji_device.cpp)
 target_include_directories(motorhand_native_hardware PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(motorhand_native_hardware PUBLIC nlohmann_json::nlohmann_json Threads::Threads)
 
@@ -53,7 +54,7 @@ add_library(wuji_sdk_c SHARED IMPORTED)
 set_target_properties(wuji_sdk_c PROPERTIES
   IMPORTED_LOCATION "${WUJI_SDK_ROOT}/lib/libwuji_sdk_c.so"
   INTERFACE_INCLUDE_DIRECTORIES "${WUJI_SDK_ROOT}/include")
-add_library(motorhand_native_identity STATIC wuji_identity.cpp)
+add_library(motorhand_native_identity STATIC hands/wuji/wuji_identity.cpp)
 target_include_directories(motorhand_native_identity PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(motorhand_native_identity PUBLIC wuji_sdk_c)
 
@@ -76,6 +77,9 @@ set_target_properties(inference_bridge PROPERTIES BUILD_RPATH "${WUJI_SDK_ROOT}/
 
 option(MOTORHAND_NATIVE_TESTS "Build offline native control regression tests" OFF)
 if(MOTORHAND_NATIVE_TESTS)
+  add_executable(hand_contract_native_test "${PROJECT_ROOT}/tests/test_hand_contract_native.cpp")
+  target_include_directories(hand_contract_native_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  add_test(NAME hand_contract_native_test COMMAND hand_contract_native_test)
   add_executable(encos_gateway_snapshot_native_test "${PROJECT_ROOT}/tests/test_encos_gateway_snapshot_native.cpp")
   target_include_directories(encos_gateway_snapshot_native_test PRIVATE "${ENCOS_G4_SDK_INCLUDE}")
   target_link_libraries(encos_gateway_snapshot_native_test PRIVATE Threads::Threads)
@@ -83,12 +87,12 @@ if(MOTORHAND_NATIVE_TESTS)
   add_executable(feedback_options_native_test "${PROJECT_ROOT}/tests/test_feedback_options_native.cpp")
   target_link_libraries(feedback_options_native_test PRIVATE motorhand_native_control "${WUJI_UDEV_LIBRARY}")
   add_test(NAME feedback_options_native_test COMMAND feedback_options_native_test)
-  add_executable(driver_impedance_native_test "${PROJECT_ROOT}/tests/test_driver_impedance_native.cpp" driver_impedance.cpp force_controller.cpp linear_force.cpp)
+  add_executable(driver_impedance_native_test "${PROJECT_ROOT}/tests/test_driver_impedance_native.cpp" common/driver_impedance.cpp hands/wuji/force_controller.cpp hands/wuji/linear_force.cpp)
   target_include_directories(driver_impedance_native_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(driver_impedance_native_test PRIVATE Eigen3::Eigen nlohmann_json::nlohmann_json)
   add_test(NAME driver_impedance_native_test COMMAND driver_impedance_native_test)
   set_tests_properties(driver_impedance_native_test PROPERTIES WORKING_DIRECTORY "${PROJECT_ROOT}")
-  add_executable(wuji_home_cancel_native_test "${PROJECT_ROOT}/tests/test_wuji_home_cancel_native.cpp" wuji_device.cpp)
+  add_executable(wuji_home_cancel_native_test "${PROJECT_ROOT}/tests/test_wuji_home_cancel_native.cpp" hands/wuji/wuji_device.cpp)
   target_include_directories(wuji_home_cancel_native_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(wuji_home_cancel_native_test PRIVATE Threads::Threads)
   add_test(NAME wuji_home_cancel_native_test COMMAND wuji_home_cancel_native_test)
@@ -115,23 +119,23 @@ if(MOTORHAND_NATIVE_TESTS)
   target_link_libraries(trajectory_native_test PRIVATE nlohmann_json::nlohmann_json OpenSSL::Crypto Threads::Threads)
   add_test(NAME trajectory_native_test COMMAND trajectory_native_test)
   set_tests_properties(trajectory_native_test PROPERTIES TIMEOUT 30)
-  add_executable(glove_output_native_test "${PROJECT_ROOT}/tests/test_glove_output_native.cpp" glove_output.cpp driver_impedance.cpp)
+  add_executable(glove_output_native_test "${PROJECT_ROOT}/tests/test_glove_output_native.cpp" common/glove_output.cpp common/driver_impedance.cpp)
   target_include_directories(glove_output_native_test PRIVATE "${PROJECT_ROOT}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(glove_output_native_test PRIVATE Threads::Threads Eigen3::Eigen nlohmann_json::nlohmann_json)
   add_test(NAME glove_output_native_test COMMAND glove_output_native_test)
   set_tests_properties(glove_output_native_test PROPERTIES TIMEOUT 30)
   add_executable(session_native_test "${PROJECT_ROOT}/tests/test_session_native.cpp")
-  target_include_directories(session_native_test PRIVATE "${PROJECT_ROOT}/src")
+  target_include_directories(session_native_test PRIVATE "${PROJECT_ROOT}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(session_native_test PRIVATE motorhand_native_core)
   add_test(NAME session_native_test COMMAND session_native_test)
   set_tests_properties(session_native_test PROPERTIES WORKING_DIRECTORY "${PROJECT_ROOT}" TIMEOUT 60)
   add_executable(inference_bridge_native_test "${PROJECT_ROOT}/tests/test_inference_bridge_native.cpp" inference_bridge.cpp)
-  target_include_directories(inference_bridge_native_test PRIVATE "${PROJECT_ROOT}/src")
+  target_include_directories(inference_bridge_native_test PRIVATE "${PROJECT_ROOT}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(inference_bridge_native_test PRIVATE motorhand_native_core)
   add_test(NAME inference_bridge_native_test COMMAND inference_bridge_native_test)
   set_tests_properties(inference_bridge_native_test PROPERTIES WORKING_DIRECTORY "${PROJECT_ROOT}" TIMEOUT 30)
-  add_executable(linear_force_native_test "${PROJECT_ROOT}/tests/test_linear_force_native.cpp" linear_force.cpp)
-  target_include_directories(linear_force_native_test PRIVATE "${PROJECT_ROOT}/src")
+  add_executable(linear_force_native_test "${PROJECT_ROOT}/tests/test_linear_force_native.cpp" hands/wuji/linear_force.cpp)
+  target_include_directories(linear_force_native_test PRIVATE "${PROJECT_ROOT}/src" "${CMAKE_CURRENT_SOURCE_DIR}")
   target_link_libraries(linear_force_native_test PRIVATE Eigen3::Eigen)
   add_test(NAME linear_force_native_test COMMAND linear_force_native_test)
   set_tests_properties(linear_force_native_test PROPERTIES TIMEOUT 30)

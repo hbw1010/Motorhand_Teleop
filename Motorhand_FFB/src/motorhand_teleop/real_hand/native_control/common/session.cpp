@@ -1,15 +1,15 @@
-#include "session.hpp"
+#include "common/session.hpp"
 
 #include "encos_driver.hpp"
-#include "force_controller.hpp"
-#include "driver_impedance.hpp"
-#include "glove_output.hpp"
-#include "inverse_worker.hpp"
-#include "jacobian_worker.hpp"
-#include "trajectory.hpp"
+#include "common/feedback.hpp"
+#include "common/driver_impedance.hpp"
+#include "common/glove_output.hpp"
+#include "common/inverse_worker.hpp"
+#include "common/jacobian_worker.hpp"
+
 #include "ve33_model.hpp"
-#include "wuji_device.hpp"
-#include "wuji_retarget.hpp"
+
+
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <chrono>
@@ -65,24 +65,24 @@ std::string describe(std::exception_ptr e) {
 }
 }
 
-struct Session::Impl {
-    SessionOptions options;
-    WujiIdentity identity;
-    std::unique_ptr<WujiDevice> hand;
+template<std::size_t N>
+struct ControlSession<N>::Impl {
+    ControlOptions options;
+    std::unique_ptr<HandDevice<N>> hand;
     std::unique_ptr<EncosDriver> glove;
     std::unique_ptr<Ve33Model> model;
-    std::unique_ptr<WujiRetarget> retarget;
-    std::unique_ptr<InverseWorker> inverse;
-    std::unique_ptr<JacobianWorker> jacobian;
-    std::unique_ptr<ForceController> force;
-    std::unique_ptr<DriverImpedancePlanner> impedance;
-    std::unique_ptr<GloveOutputWorker> output_worker;
+    std::unique_ptr<HandModel<N>> retarget;
+    std::unique_ptr<CommonInverseWorker<N>> inverse;
+    std::unique_ptr<CommonJacobianWorker<N>> jacobian;
+    std::unique_ptr<HandFeedback<N>> force;
+    std::unique_ptr<CommonDriverImpedancePlanner<N>> impedance;
+    std::unique_ptr<CommonGloveOutputWorker<N>> output_worker;
     std::optional<GlovePose> last_pose;
     std::optional<InverseWorkerResult> inverse_result;
-    std::optional<JacobianSnapshot> jacobian_result;
-    Vec20 lower{}, upper{}, last_hand_target{}, hand_anchor{};
-    Vec20 takeover_offset{}, takeover_last_raw{};
-    Vec20 zero_reference{};
+    std::optional<CommonJacobianSnapshot<N>> jacobian_result;
+    JointArray<N> lower{}, upper{}, last_hand_target{}, hand_anchor{};
+    JointArray<N> takeover_offset{}, takeover_last_raw{};
+    JointArray<N> zero_reference{};
     bool takeover_has_raw = false;
     std::uint64_t takeover_offset_clock = 0;
     Vec12 glove_anchor{};
@@ -90,21 +90,16 @@ struct Session::Impl {
     bool requested_takeover = false, mode_takeover = false, mode_initialized = false;
     bool has_hand_target = false, inverse_was_fresh = false, need_glove_anchor = true;
     bool glove_output_started = false, hand_output_started = false;
-    mutable bool trajectory_rejected = false;
     std::uint64_t transition_elapsed = 0, transition_clock = 0, glove_transition_start = 0;
     std::uint64_t inverse_submit_stamp = 0, inverse_last_id = 0, inverse_min_id = 0, inverse_consumed_id = 0;
     std::uint64_t inverse_wait_start = 0, jac_submit_stamp = 0;
 
-    explicit Impl(SessionOptions o) : options(std::move(o)) {
-        if (options.force_feedback && !options.glove_output)
-            throw std::invalid_argument("force feedback requires glove output");
-        if (options.zero_aligned_start && !options.glove_output)
-            throw std::invalid_argument("zero-aligned start requires glove output for homing");
-        if (options.driver_impedance_feedback && (!options.force_feedback || options.linear_force_feedback))
-            throw std::invalid_argument("driver impedance requires contact feedback");
-        if (!std::isfinite(options.feedback_hardness) || options.feedback_hardness<0 || options.feedback_hardness>1)
-            throw std::invalid_argument("feedback hardness must be in [0,1]");
-        if (!options.transition_ns) throw std::invalid_argument("transition duration must be positive");
+    Impl(ControlOptions o,std::unique_ptr<HandDevice<N>> device,std::unique_ptr<HandModel<N>> solver,
+         std::unique_ptr<HandFeedback<N>> feedback)
+        : options(std::move(o)),hand(std::move(device)),retarget(std::move(solver)),force(std::move(feedback)) {
+        if(!hand || !retarget || (options.force_feedback && !force))
+            throw std::invalid_argument("共同会话缺少设备、模型或反馈策略");
+        validate_control_options(options);
     }
     std::string cleanup() noexcept {
         std::string errors;
@@ -120,10 +115,10 @@ struct Session::Impl {
         }
         if (glove && glove_output_started) attempt("Encos disable", [&] { glove->disable(); });
         glove_output_started = false;
-        if (hand && hand_output_started) attempt("Wuji disable", [&] { hand->disable(); });
+        if (hand && hand_output_started) attempt("机械手 disable", [&] { hand->disable(); });
         hand_output_started = false;
         enabled = false;
-        if (hand) attempt("Wuji close", [&] { hand->close(); });
+        if (hand) attempt("机械手 close", [&] { hand->close(); });
         if (glove) attempt("Encos close", [&] { glove->close(); });
         jacobian.reset();
         inverse.reset();
@@ -136,27 +131,12 @@ struct Session::Impl {
         const auto cleanup_error = cleanup();
         throw std::runtime_error(cause + (cleanup_error.empty() ? "" : "; shutdown: " + cleanup_error));
     }
-    HandFrame read_hand(bool require_enabled) {
-        const RealHandState raw = hand->read();
-        const auto now = now_ns();
-        require_fresh(raw.timestamp_ns, now);
-        if ((require_enabled && raw.phase != 2) || (!require_enabled && raw.phase != 1 && raw.phase != 2))
-            throw std::runtime_error("Wuji not in expected connected/enabled state");
-        HandFrame result;
-        result.received_ns = raw.timestamp_ns;
-        result.has_velocity = raw.has_velocity != 0; result.has_effort = raw.has_effort != 0;
-        for (int i = 0; i < 20; ++i) {
-            if (!raw.online[i] || (require_enabled && !raw.enabled[i]) ||
-                !std::isfinite(raw.positions[i]) || !std::isfinite(raw.lower_limits[i]) ||
-                !std::isfinite(raw.upper_limits[i]) || raw.lower_limits[i] >= raw.upper_limits[i])
-                throw std::runtime_error("Wuji feedback incomplete, faulted, or limits invalid");
-            lower[i] = raw.lower_limits[i]; upper[i] = raw.upper_limits[i];
-            result.position_rad[i] = raw.positions[i];
-            result.velocity_rad_s[i] = raw.velocities_rad_s[i]; result.effort_a[i] = raw.effort_a[i];
-        }
-        if ((result.has_velocity && !finite(result.velocity_rad_s)) || (result.has_effort && !finite(result.effort_a)))
-            throw std::runtime_error("non-finite Wuji feedback");
-        if (options.force_feedback && !result.has_effort) throw std::runtime_error("Wuji effort feedback unavailable");
+    HandState<N> read_hand(bool require_enabled) {
+        auto result = hand->read();
+        const auto& descriptor = hand->descriptor();
+        validate_hand_state(result,descriptor,now_ns(),require_enabled);
+        lower=descriptor.lower_rad; upper=descriptor.upper_rad;
+        if (options.force_feedback && !result.has_load) throw std::runtime_error("机械手负载反馈不可用");
         return result;
     }
     GloveFrame read_glove() {
@@ -174,13 +154,13 @@ struct Session::Impl {
         last_pose = pose;
         return pose;
     }
-    void check_target(const Vec20& target) const {
-        if (!finite(target)) throw std::invalid_argument("non-finite Wuji target");
-        for (int i = 0; i < 20; ++i)
+    void check_target(const JointArray<N>& target) const {
+        if (!finite(target)) throw std::invalid_argument("non-finite 机械手 target");
+        for (int i = 0; i < N; ++i)
             if (target[i] < lower[i] || target[i] > upper[i])
-                throw std::invalid_argument("Wuji target exceeds joint limits");
+                throw std::invalid_argument("机械手 target exceeds joint limits");
     }
-    void enter_mode(bool takeover, const HandFrame& hand_frame, const GloveFrame& glove_frame) {
+    void enter_mode(bool takeover, const HandState<N>& hand_frame, const GloveFrame& glove_frame) {
         const bool was_takeover = mode_initialized && mode_takeover;
         mode_takeover = takeover; mode_initialized = true;
         hand_anchor = has_hand_target ? last_hand_target : hand_frame.position_rad;
@@ -200,7 +180,7 @@ struct Session::Impl {
             output_worker.reset();
             glove->disable();
         } else if (!takeover && options.glove_output && !output_worker) {
-            output_worker = std::make_unique<GloveOutputWorker>(*glove, nullptr);
+            output_worker = std::make_unique<CommonGloveOutputWorker<N>>(*glove, nullptr);
         }
     }
     double hand_blend(std::uint64_t now, bool advance) {
@@ -214,32 +194,29 @@ struct Session::Impl {
     }
 };
 
-Session::Session(SessionOptions options) : impl_(std::make_unique<Impl>(std::move(options))) {}
-Session::~Session() { if (impl_ && !impl_->closed) impl_->cleanup(); }
-const WujiIdentity& Session::connect() {
+template<std::size_t N>
+ControlSession<N>::ControlSession(ControlOptions options,std::unique_ptr<HandDevice<N>> hand,
+    std::unique_ptr<HandModel<N>> model,std::unique_ptr<HandFeedback<N>> feedback)
+    : impl_(std::make_unique<Impl>(std::move(options),std::move(hand),std::move(model),std::move(feedback))) {}
+template<std::size_t N>
+ControlSession<N>::~ControlSession() { if (impl_ && !impl_->closed) impl_->cleanup(); }
+template<std::size_t N>
+const HandDescriptor<N>& ControlSession<N>::connect() {
     auto& s = *impl_;
     if (s.closed || s.fault || s.connected) throw std::runtime_error("session cannot connect in current state");
     try {
-        s.identity = inspect_wuji(s.options.wuji_serial, s.options.left);
-        if ((!s.options.wuji_serial.empty() && s.identity.serial != s.options.wuji_serial) || s.identity.left != s.options.left ||
-            s.identity.firmware != s.options.approved_firmware)
-            throw std::runtime_error("Wuji preflight identity or firmware mismatch");
         const auto mapping_config = json_file(s.options.glove_mapping);
         if (!mapping_config.contains("calibrated") || mapping_config.at("calibrated") != true)
             throw std::runtime_error("Encos mapping is not calibrated");
         double jac_step = 0.01;
         if (s.options.force_feedback) {
             const auto cfg = json_file(s.options.linear_feedback);
-            if (cfg.at("wuji_serial_number").get<std::string>() != s.identity.serial ||
-                cfg.at("glove_hand").get<std::string>() != (s.options.left ? "left" : "right"))
-                throw std::runtime_error("force feedback serial or hand mismatch");
             jac_step = cfg.value("jacobian_step_rad", 0.01);
         }
         s.glove = std::make_unique<EncosDriver>(s.options.glove_mapping.string(),
             s.options.force_feedback ? s.options.linear_feedback.string() : std::string{});
         const auto cal = s.glove->calibration();
-        Vec12 signs{}, scales{}, lo{}, hi{};
-        std::array<int, 12> raw_to_model{};
+        Vec12 lo{}, hi{};
         std::array<bool, 12> seen{};
         std::array<std::array<double, 2>, 12> bounds{};
         for (int i = 0; i < 12; ++i) {
@@ -248,59 +225,48 @@ const WujiIdentity& Session::connect() {
                 m.sign == 0 || m.scale == 0 || !std::isfinite(m.model_min_rad) || !std::isfinite(m.model_max_rad) ||
                 m.model_min_rad >= m.model_max_rad || (s.options.force_feedback && !m.has_torque_limit))
                 throw std::runtime_error("invalid Encos motor calibration");
-            seen[raw] = true; signs[raw] = m.sign; scales[raw] = m.scale; raw_to_model[raw] = i + 1;
+            seen[raw] = true;
             lo[i] = m.model_min_rad; hi[i] = m.model_max_rad; bounds[i] = {lo[i], hi[i]};
         }
         s.model = std::make_unique<Ve33Model>(s.options.asset_root, s.options.left);
-        s.retarget = std::make_unique<WujiRetarget>(s.options.retarget_yaml, s.options.left);
         if (s.options.zero_aligned_start) {
             // 在无输出时收敛模型零位的优化器先验；不能把任意启动姿态作为零位。
             const auto zero = s.model->zero();
             for (int i = 0; i < 30; ++i) s.zero_reference = s.retarget->solve(zero.points_m);
         }
         if (s.options.force_feedback) {
-            s.force = std::make_unique<ForceController>(s.options.contact_feedback.string(), s.options.linear_feedback.string(), signs, scales, raw_to_model, s.options.linear_force_feedback);
             s.force->set_motor_limits(lo, hi);
             if (s.options.driver_impedance_feedback)
-                s.impedance = std::make_unique<DriverImpedancePlanner>(
+                s.impedance = std::make_unique<CommonDriverImpedancePlanner<N>>(
                     load_driver_impedance_config(s.options.driver_impedance_config.string()),s.options.feedback_hardness,cal);
         }
-        s.hand = std::make_unique<WujiDevice>(s.identity, s.options.approved_firmware);
         s.hand->connect();
+        if(s.hand->descriptor().identity.left!=s.options.left)
+            throw std::runtime_error("机械手与手套手侧不匹配");
         s.glove->connect();
         s.read_hand(false);
         auto glove = s.read_glove();
         s.pose_for(glove);
         if (s.options.glove_output)
-            s.inverse = std::make_unique<InverseWorker>(s.options.asset_root, s.options.retarget_yaml, s.options.left, bounds);
+            s.inverse = std::make_unique<CommonInverseWorker<N>>(s.options.asset_root, [model=s.retarget.get()] { return model->create_solver(); }, s.options.left, bounds);
         if (s.options.force_feedback)
-            s.jacobian = std::make_unique<JacobianWorker>(s.options.asset_root, s.options.retarget_yaml, s.options.left, jac_step);
+            s.jacobian = std::make_unique<CommonJacobianWorker<N>>(s.options.asset_root, [model=s.retarget.get()] { return model->create_solver(true); }, s.options.left, jac_step);
         s.connected = true;
-        return s.identity;
+        return s.hand->descriptor();
     } catch (...) { s.fail(std::current_exception()); }
 }
-HandFrame Session::read_wuji_state() {
+template<std::size_t N>
+HandState<N> ControlSession<N>::read_hand_state() {
     auto& s = *impl_;
     try {
         if (!s.connected || s.closed || s.fault) throw std::runtime_error("session is not connected");
-        auto frame = s.read_hand(s.enabled);
-        if (!frame.has_velocity || !frame.has_effort)
-            throw std::runtime_error("Wuji velocity or current feedback unavailable");
-        return frame;
+        return s.read_hand(s.enabled);
     } catch (...) { s.fail(std::current_exception()); }
 }
-void Session::validate_trajectory(const Trajectory& trajectory) const {
+template<std::size_t N>
+void ControlSession<N>::enable() {
     auto& s = *impl_;
-    if (!s.connected || s.enabled || s.closed || s.fault) throw std::runtime_error("trajectory validation requires connected, disabled session");
-    s.trajectory_rejected = true;
-    if (trajectory.hand() != (s.identity.left ? "left" : "right") || trajectory.serial() != s.identity.serial ||
-        trajectory.firmware() != s.identity.firmware) throw std::runtime_error("trajectory identity or firmware mismatch");
-    trajectory.validate_limits(s.lower, s.upper);
-    s.trajectory_rejected = false;
-}
-void Session::enable() {
-    auto& s = *impl_;
-    if (!s.connected || s.enabled || s.closed || s.fault || s.trajectory_rejected)
+    if (!s.connected || s.enabled || s.closed || s.fault)
         throw std::runtime_error("session cannot enable in current state");
     try {
         if (s.options.stop_requested && s.options.stop_requested->load())
@@ -309,7 +275,7 @@ void Session::enable() {
         if (s.options.stop_requested && s.options.stop_requested->load())
             throw std::runtime_error("启动已取消");
         if (s.options.glove_output)
-            s.output_worker = std::make_unique<GloveOutputWorker>(*s.glove, s.force.get(), s.impedance.get());
+            s.output_worker = std::make_unique<CommonGloveOutputWorker<N>>(*s.glove, s.force.get(), s.impedance.get());
         s.hand_output_started = true; s.hand->enable();
         if (s.options.zero_aligned_start) s.hand->home(s.options.stop_requested);
         const auto h = s.read_hand(true); const auto g = s.read_glove();
@@ -318,19 +284,21 @@ void Session::enable() {
         s.mode_initialized = false; s.enabled = true;
     } catch (...) { s.fail(std::current_exception()); }
 }
-void Session::request_takeover(bool takeover) {
+template<std::size_t N>
+void ControlSession<N>::request_takeover(bool takeover) {
     auto& s = *impl_;
     if (!s.enabled || s.closed || s.fault) throw std::runtime_error("session is not enabled");
     s.requested_takeover = takeover;
 }
 
-SessionTick Session::step_inference(const Vec20& input, std::uint64_t source_ns) {
+template<std::size_t N>
+ControlTick<N> ControlSession<N>::step_inference(const JointArray<N>& input, std::uint64_t source_ns) {
     auto& s = *impl_;
     try {
         if (!s.enabled || s.closed || s.fault || s.requested_takeover) throw std::runtime_error("session is not in inference mode");
         const auto cycle_start = now_ns();
         require_fresh(source_ns, now_ns());
-        Vec20 candidate = input; s.check_target(candidate);
+        JointArray<N> candidate = input; s.check_target(candidate);
         auto h = s.read_hand(true); auto g = s.read_glove(); auto pose = s.pose_for(g);
         if (!s.mode_initialized || s.mode_takeover) {
             s.enter_mode(false, h, g);
@@ -349,7 +317,7 @@ SessionTick Session::step_inference(const Vec20& input, std::uint64_t source_ns)
                 s.inverse_result = std::move(*done);
             }
             if (h.received_ns > s.inverse_submit_stamp) {
-                HandFrame source = h;
+                HandState<N> source = h;
                 if (s.options.inverse_follows_command && s.has_hand_target) source.position_rad = s.last_hand_target;
                 s.inverse_last_id = s.inverse->submit(source, pose, h.received_ns);
                 s.inverse_submit_stamp = h.received_ns;
@@ -372,7 +340,7 @@ SessionTick Session::step_inference(const Vec20& input, std::uint64_t source_ns)
         auto now = now_ns();
         const double alpha = s.hand_blend(now, fresh_inverse && s.inverse_was_fresh);
         s.inverse_was_fresh = fresh_inverse;
-        Vec20 target = fresh_inverse ? blend(s.hand_anchor, candidate, alpha) :
+        JointArray<N> target = fresh_inverse ? blend(s.hand_anchor, candidate, alpha) :
             (s.has_hand_target ? s.last_hand_target : h.position_rad);
         s.check_target(target);
         auto until = std::min({deadline(source_ns), deadline(h.received_ns), deadline(g.oldest_ns)});
@@ -389,7 +357,7 @@ SessionTick Session::step_inference(const Vec20& input, std::uint64_t source_ns)
         require_deadline(until);
         if (s.inverse && fresh_inverse) require_deadline(glove_until);
         s.hand->send(target, until);
-        const auto wuji_submit = now_ns();
+        const auto hand_submit = now_ns();
         s.last_hand_target = target; s.has_hand_target = true;
         if (s.inverse && fresh_inverse) {
             require_deadline(glove_until);
@@ -398,17 +366,18 @@ SessionTick Session::step_inference(const Vec20& input, std::uint64_t source_ns)
         }
         const Vec12 glove_target = completed ? completed->applied : Vec12{};
         const std::uint64_t glove_submit = completed ? completed->last_write_ns : 0;
-        SessionTick tick{h, g, target, glove_target, false, fresh_inverse, false, until};
+        ControlTick<N> tick{h, g, target, glove_target, false, fresh_inverse, false, until};
         tick.glove_pose = pose;
         tick.force_commanded = false;
         tick.glove_output_source_ns = completed ? completed->source_ns : 0;
-        tick.cycle_started_ns = cycle_start; tick.wuji_submit_ns = wuji_submit;
+        tick.cycle_started_ns = cycle_start; tick.hand_submit_ns = hand_submit;
         tick.glove_submit_ns = glove_submit; tick.cycle_completed_ns = now_ns();
         return tick;
     } catch (...) { s.fail(std::current_exception()); }
 }
 
-SessionTick Session::step_takeover() {
+template<std::size_t N>
+ControlTick<N> ControlSession<N>::step_takeover() {
     auto& s = *impl_;
     try {
         if (!s.enabled || s.closed || s.fault || !s.requested_takeover) throw std::runtime_error("session is not in takeover mode");
@@ -429,13 +398,13 @@ SessionTick Session::step_takeover() {
                 s.jacobian->submit(pose, g.oldest_ns); s.jac_submit_stamp = g.oldest_ns;
             }
         }
-        Vec20 target = s.retarget->solve(pose.points_m);
+        JointArray<N> target = s.retarget->solve(pose.points_m);
         if (!s.options.zero_aligned_start) s.check_target(target);
-        std::array<bool, 20> saturated{};
+        std::array<bool, N> saturated{};
         double zero_blend = 1.0;
         if (s.options.zero_aligned_start) {
             // 固定参考只减去零手套的重定向姿态；不随累计运动衰减，回零可重复。
-            for (int i = 0; i < 20; ++i) {
+            for (int i = 0; i < N; ++i) {
                 target[i] -= s.zero_reference[i];
                 saturated[i] = target[i] <= s.lower[i] || target[i] >= s.upper[i];
                 target[i] = std::clamp(target[i], s.lower[i], s.upper[i]);
@@ -445,20 +414,20 @@ SessionTick Session::step_takeover() {
         } else if (s.options.takeover_offset_motion_rad > 0) {
             const auto now = now_ns();
             if (!s.takeover_has_raw) {
-                for (int i = 0; i < 20; ++i) s.takeover_offset[i] = s.hand_anchor[i] - target[i];
+                for (int i = 0; i < N; ++i) s.takeover_offset[i] = s.hand_anchor[i] - target[i];
                 s.takeover_has_raw = true;
             } else {
                 const double dt = now > s.takeover_offset_clock ? double(now - s.takeover_offset_clock) : 0.0;
                 const double time_decay = s.options.takeover_offset_tau_ns ?
                     std::exp(-dt / double(s.options.takeover_offset_tau_ns)) : 1.0;
-                for (int i = 0; i < 20; ++i) {
+                for (int i = 0; i < N; ++i) {
                     const double motion = std::abs(target[i] - s.takeover_last_raw[i]);
                     s.takeover_offset[i] *= time_decay * std::exp(-motion / s.options.takeover_offset_motion_rad);
                 }
             }
             s.takeover_offset_clock = now;
             s.takeover_last_raw = target;
-            for (int i = 0; i < 20; ++i)
+            for (int i = 0; i < N; ++i)
                 target[i] = std::clamp(target[i] + s.takeover_offset[i], s.lower[i], s.upper[i]);
         } else {
             target = blend(s.hand_anchor, target, s.hand_blend(now_ns(), true));
@@ -470,26 +439,26 @@ SessionTick Session::step_takeover() {
             throw std::runtime_error("old glove output crossed mode barrier");
         require_deadline(until);
         s.hand->send(target, until);
-        const auto wuji_submit = now_ns();
+        const auto hand_submit = now_ns();
         s.last_hand_target = target; s.has_hand_target = true;
         if (s.force) {
             require_deadline(until);
             auto effective_jacobian = s.jacobian_result;
             if (s.options.zero_aligned_start && effective_jacobian) {
-                for (int row = 0; row < 20; ++row)
+                for (int row = 0; row < N; ++row)
                     for (int col = 0; col < 12; ++col)
                         effective_jacobian->jacobian[row * 12 + col] *= saturated[row] ? 0.0 : zero_blend;
             }
             s.output_worker->submit_force(target, h, g, pose, effective_jacobian, until);
         }
         const bool computed = completed && completed->force_computed;
-        const ForceResult feedback = computed ? completed->force : ForceResult{};
+        const FeedbackResult<N> feedback = computed ? completed->force : FeedbackResult<N>{};
         const Vec12 actual = completed ? completed->applied : Vec12{};
         const std::uint64_t glove_submit = completed ? completed->last_write_ns : 0;
-        SessionTick tick{h, g, target, actual, true, true, computed && feedback.active, until};
+        ControlTick<N> tick{h, g, target, actual, true, true, computed && feedback.active, until};
         tick.glove_pose = pose; tick.virtual_hand_nm = feedback.virtual_hand_nm; tick.contact = feedback.contact;
         tick.linear_force = s.options.linear_force_feedback;
-        tick.wuji_load_fraction = feedback.wuji_load_fraction;
+        tick.load_fraction = feedback.load_fraction;
         tick.glove_projected_nm = feedback.projected_motor_nm;
         tick.glove_requested_nm = feedback.model_motor_nm;
         tick.driver_impedance = s.options.driver_impedance_feedback;
@@ -513,25 +482,31 @@ SessionTick Session::step_takeover() {
             tick.glove_driver_estimate_received_ns = completed->impedance.estimate_received_ns;
             tick.glove_driver_velocity_received_ns = completed->impedance.command.velocity_received_ns;
         }
-        tick.filtered_current_a = feedback.filtered_current_a;
+        tick.filtered_load = feedback.filtered_load;
         tick.contact_reflection_gain = feedback.reflection_gain;
         tick.hand_to_motor = feedback.hand_to_motor;
-        tick.wuji_projection_current_a = feedback.projection_current_a;
-        tick.wuji_projection_received_ns = feedback.projection_received_ns;
+        tick.projection_load = feedback.projection_load;
+        tick.projection_received_ns = feedback.projection_received_ns;
         tick.contact_phase = completed ? (computed ? feedback.phase : ContactPhase::waiting_geometry) :
                                          ContactPhase::not_configured;
         tick.force_commanded = completed.has_value();
         tick.glove_output_source_ns = completed ? completed->source_ns : 0;
         tick.jacobian_source_ns = completed ? completed->jacobian_source_ns : 0;
-        tick.cycle_started_ns = cycle_start; tick.wuji_submit_ns = wuji_submit;
+        tick.cycle_started_ns = cycle_start; tick.hand_submit_ns = hand_submit;
         tick.glove_submit_ns = glove_submit; tick.cycle_completed_ns = now_ns();
         return tick;
     } catch (...) { s.fail(std::current_exception()); }
 }
-void Session::stop() {
+template<std::size_t N>
+void ControlSession<N>::stop() {
     auto& s = *impl_;
     if (s.closed) return;
     const auto errors = s.cleanup();
     if (!errors.empty()) { s.fault = true; throw std::runtime_error("session shutdown: " + errors); }
 }
+template<std::size_t N> const HandDescriptor<N>& ControlSession<N>::descriptor() const {
+    return impl_->hand->descriptor();
+}
+template class ControlSession<20>;
+template class ControlSession<22>;
 } // namespace motorhand::native

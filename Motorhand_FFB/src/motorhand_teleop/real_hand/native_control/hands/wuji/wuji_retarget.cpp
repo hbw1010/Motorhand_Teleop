@@ -346,7 +346,7 @@ struct WujiRetarget::Impl {
 };
 
 WujiRetarget::WujiRetarget(const std::filesystem::path& yaml_path, bool left)
-    : impl_(std::make_unique<Impl>(yaml_path, left)) {}
+    : yaml_path_(yaml_path), left_(left), impl_(std::make_unique<Impl>(yaml_path, left)) {}
 WujiRetarget::~WujiRetarget() = default;
 WujiRetarget::WujiRetarget(WujiRetarget&&) noexcept = default;
 WujiRetarget& WujiRetarget::operator=(WujiRetarget&&) noexcept = default;
@@ -385,3 +385,11 @@ void WujiRetarget::set_initial_hint(const Vec20* hint) {
 }
 
 }  // namespace motorhand::native
+
+namespace motorhand::native {
+std::unique_ptr<HandModel<20>> WujiRetarget::create_solver(bool differentiation) const {
+    auto solver=std::make_unique<WujiRetarget>(yaml_path_,left_);
+    if(differentiation)solver->configure_differentiation();
+    return solver;
+}
+}

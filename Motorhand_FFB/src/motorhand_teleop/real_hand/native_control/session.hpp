@@ -1,6 +1,7 @@
 #pragma once
 
 #include "types.hpp"
+#include "common/session_options.hpp"
 #include "wuji_identity.hpp"
 
 #include <cstdint>
@@ -13,43 +14,13 @@ namespace motorhand::native {
 
 class Trajectory;
 
-struct SessionOptions {
-    std::filesystem::path asset_root;
+// 旧Wuji入口仅转换身份和遥测字段，控制核心只有一份。
+struct SessionOptions : ControlOptions {
     std::filesystem::path retarget_yaml;
-    std::filesystem::path glove_mapping;
-    std::filesystem::path linear_feedback;
     std::filesystem::path contact_feedback;
     std::string wuji_serial;
     std::string approved_firmware;
-    bool glove_output = true;
-    bool force_feedback = true;
-    bool linear_force_feedback = false;
-    bool driver_impedance_feedback = false; // force-contact CLI默认启用；其他调用保留旧模式。
-    std::filesystem::path driver_impedance_config;
-    double feedback_hardness = 0.3; // 人工设定，非物体硬度估计。
-    bool left = false;
-    // 独立力反馈遥操：两侧各自回零，使用固定的手套零位重定向参考。
-    // 推理/回放接管不启用，不改变其保持抓握的过渡语义。
-    bool zero_aligned_start = false;
-    // 可选取消标志由调用方持有，须活过Session；CLI使用无锁原子信号标志。
-    const std::atomic<bool>* stop_requested = nullptr;
-    std::uint64_t transition_ns = 500'000'000;
-    // Inference: the glove shadow follows the Wuji *command* (true) or the measured
-    // Wuji position (false).  Following the command keeps a grasp's squeeze (command
-    // deeper than the blocked fingers) in the glove pose, so the forward solve at
-    // takeover reproduces the command instead of releasing the object.
-    bool inverse_follows_command = true;
-    // Takeover handover: the remaining difference between the last command and the
-    // forward solve is kept as a per-joint offset, so the switch itself does not move
-    // the hand.  An offset decays only as the operator moves that joint (by
-    // exp(-|motion| / takeover_offset_motion_rad)); takeover_offset_motion_rad = 0
-    // restores the legacy 0.5 s blend.  takeover_offset_tau_ns > 0 adds a time decay
-    // (the hand then also re-aligns while the operator holds still); 0 = off (default,
-    // to be judged on hardware).
-    double takeover_offset_motion_rad = 0.10;
-    std::uint64_t takeover_offset_tau_ns = 0;
 };
-
 struct SessionTick {
     HandFrame hand{};
     GloveFrame glove{};

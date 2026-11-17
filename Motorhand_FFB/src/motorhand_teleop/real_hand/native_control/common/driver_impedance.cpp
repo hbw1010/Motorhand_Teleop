@@ -1,4 +1,4 @@
-#include "driver_impedance.hpp"
+#include "common/driver_impedance.hpp"
 #include <Eigen/Core>
 #include <Eigen/LU>
 #include <Eigen/Cholesky>
@@ -70,7 +70,8 @@ Vec12 MotorVelocityEstimator::update(const GloveFrame& g,std::uint64_t now){
         stamps_[i]=t;q_[i]=g.motor_rad[i];
     }return velocity_;
 }
-DriverImpedancePlanner::DriverImpedancePlanner(DriverImpedanceConfig c,double hardness,const std::array<EncosMotorCalibration,12>& cal)
+template<std::size_t N>
+CommonDriverImpedancePlanner<N>::CommonDriverImpedancePlanner(DriverImpedanceConfig c,double hardness,const std::array<EncosMotorCalibration,12>& cal)
 :config_(c),hardness_(hardness),calibration_(cal),velocity_(c.velocity_filter_hz){
     for(double x:{c.stiffness_min,c.stiffness_max,c.gain,c.damping_s,c.damping_max,c.lookahead_s,c.damping_off_velocity,
         c.damping_on_velocity,c.torque_margin,c.surface_rate,c.inverse_regularization,c.max_proxy_offset,c.ramp_s,
@@ -86,10 +87,12 @@ DriverImpedancePlanner::DriverImpedancePlanner(DriverImpedanceConfig c,double ha
         used[raw]=true;nonnegative(c.joint_gain[raw]);nonnegative(c.kp_max[raw]);nonnegative(c.coulomb_nm[raw]);
     }
 }
-void DriverImpedancePlanner::reset(std::uint64_t now){velocity_.reset();direction_={};damping_={};surface_={};reset_ns_=now;source_ns_=0;}
-DriverImpedancePlan DriverImpedancePlanner::step(const Vec20& target,const HandFrame& hand,const GloveFrame& g,const GlovePose& pose,
-    const std::array<double,240>& jac,const ForceResult& contact,std::uint64_t now){
-    DriverImpedancePlan out;out.command.target_rad=g.motor_rad;
+template<std::size_t N>
+void CommonDriverImpedancePlanner<N>::reset(std::uint64_t now){velocity_.reset();direction_={};damping_={};surface_={};reset_ns_=now;source_ns_=0;}
+template<std::size_t N>
+CommonDriverImpedancePlan<N> CommonDriverImpedancePlanner<N>::step(const JointArray<N>& target,const HandState<N>& hand,const GloveFrame& g,const GlovePose& pose,
+    const RetargetJacobian<N>& jac,const FeedbackResult<N>& contact,std::uint64_t now){
+    CommonDriverImpedancePlan<N> out;out.command.target_rad=g.motor_rad;
     auto& observation=out.observation;observation.input_rad=g.motor_rad;observation.source_ns=g.received_ns;
     auto release=[&](ImpedanceReason reason){
         observation.impedance_contact={};for(auto& axis:observation.axes)axis.add(reason);
@@ -97,16 +100,16 @@ DriverImpedancePlan DriverImpedancePlanner::step(const Vec20& target,const HandF
     };
     if(!contact.active)return release(ImpedanceReason::inactive_geometry);
     for(int i=0;i<12;++i)if(!fresh(g.received_ns[i],now)||!std::isfinite(g.motor_rad[i]))return release(ImpedanceReason::invalid_input);
-    using Mat12=Eigen::Matrix<double,12,12,Eigen::RowMajor>;using Mat20=Eigen::Matrix<double,20,12,Eigen::RowMajor>;
-    const Eigen::Map<const Mat12> m(pose.motor_jacobian.data());const Eigen::Map<const Mat20> j(jac.data());
+    using Mat12=Eigen::Matrix<double,12,12,Eigen::RowMajor>;using MatHand=Eigen::Matrix<double,N,12,Eigen::RowMajor>;
+    const Eigen::Map<const Mat12> m(pose.motor_jacobian.data());const Eigen::Map<const MatHand> j(jac.data());
     if(!m.allFinite()||!j.allFinite()||j.norm()<1e-8)
         return release(!m.allFinite()||!j.allFinite()?ImpedanceReason::invalid_geometry:ImpedanceReason::unobservable_geometry);
     Eigen::FullPivLU<Mat12> lu(m);if(!lu.isInvertible()||lu.rcond()<1e-8)return release(ImpedanceReason::singular_transmission);
-    const Mat20 a=j*lu.inverse();if(!a.allFinite())return release(ImpedanceReason::invalid_geometry);
+    const MatHand a=j*lu.inverse();if(!a.allFinite())return release(ImpedanceReason::invalid_geometry);
     Eigen::Matrix<double,12,12> normal=Eigen::Matrix<double,12,12>::Identity()*config_.inverse_regularization;
     Eigen::Matrix<double,12,1> rhs=Eigen::Matrix<double,12,1>::Zero();
     bool any=false;
-    for(int row=0;row<20;++row)if(contact.impedance_contact[row]){
+    for(int row=0;row<N;++row)if(contact.impedance_contact[row]){
         if(!std::isfinite(target[row])||!std::isfinite(hand.position_rad[row])||a.row(row).norm()<1e-8)return release(ImpedanceReason::invalid_contact_row);
         double e=target[row]-hand.position_rad[row];
         if(std::abs(contact.contact_direction[row])!=1 || contact.contact_direction[row]*e<=0)continue;
@@ -127,7 +130,7 @@ DriverImpedancePlan DriverImpedancePlanner::step(const Vec20& target,const HandF
             (config_.stiffness_min+(config_.stiffness_max-config_.stiffness_min)*hardness_)*config_.gain*config_.joint_gain[raw])*ramp;
         int dir=any && std::abs(delta[i])>1e-5?(delta[i]>0?1:-1):0;
         // 与受阻行有关但局部逆互相抵消的轴，保守关闭摩擦，不能把其当成自由空间。
-        bool coupled=false;for(int row=0;row<20;++row)if(contact.contact[row]&&std::abs(a(row,i))>1e-7)coupled=true;
+        bool coupled=false;for(int row=0;row<N;++row)if(contact.contact[row]&&std::abs(a(row,i))>1e-7)coupled=true;
         DriverAxisCommand axis;axis.target_rad=q;
         if(dir){
             if(direction_[i]!=dir){surface_[i]=q;damping_[i]=false;}
@@ -164,4 +167,6 @@ DriverImpedancePlan DriverImpedancePlanner::step(const Vec20& target,const HandF
     }
     out.valid=true;return out;
 }
+template class CommonDriverImpedancePlanner<20>;
+template class CommonDriverImpedancePlanner<22>;
 } // namespace motorhand::native

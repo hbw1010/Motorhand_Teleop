@@ -1,7 +1,7 @@
-#include "inverse_retarget.hpp"
+#include "common/inverse_retarget.hpp"
 
 #include "ve33_model.hpp"
-#include "wuji_retarget.hpp"
+#include "common/hand.hpp"
 
 #include <Eigen/Cholesky>
 #include <Eigen/Core>
@@ -198,13 +198,15 @@ void kkt_residual(Evaluation& eval, const Vec12& q, const Vec12& lower,
 }
 
 }  // namespace
-struct InverseRetarget::Optimizer {
+template<std::size_t N>
+struct CommonInverseRetarget<N>::Optimizer {
     nlopt_opt value = nlopt_create(NLOPT_LD_SLSQP, kJoints);
     ~Optimizer() { if (value) nlopt_destroy(value); }
 };
 
 
-InverseRetarget::InverseRetarget(Ve33Model& glove, WujiRetarget& hand, Bounds motor_bounds, bool scale_aware)
+template<std::size_t N>
+CommonInverseRetarget<N>::CommonInverseRetarget(Ve33Model& glove, HandModel<N>& hand, Bounds motor_bounds, bool scale_aware)
     : optimizer_(std::make_unique<Optimizer>()), glove_(glove), hand_(hand), motor_bounds_(motor_bounds) {
     scales_.fill(1.0);
     if (scale_aware) scales_ = hand_.task_scales();
@@ -217,9 +219,11 @@ InverseRetarget::InverseRetarget(Ve33Model& glove, WujiRetarget& hand, Bounds mo
     }
 }
 
-InverseRetarget::~InverseRetarget() = default;
+template<std::size_t N>
+CommonInverseRetarget<N>::~CommonInverseRetarget() = default;
 
-InverseResult InverseRetarget::solve(const Vec20& actual_hand, const GlovePose& measured_seed) {
+template<std::size_t N>
+InverseResult CommonInverseRetarget<N>::solve(const JointArray<N>& actual_hand, const GlovePose& measured_seed) {
     const auto started = std::chrono::steady_clock::now();
     InverseResult result;
     result.pose = measured_seed;
@@ -229,7 +233,7 @@ InverseResult InverseRetarget::solve(const Vec20& actual_hand, const GlovePose& 
         result.failure_reason = std::move(reason);
         return result;
     };
-    if (!finite_array(actual_hand)) return fail("non-finite Hand2 feedback");
+    if (!finite_array(actual_hand)) return fail("non-finite hand feedback");
     if (!finite_pose(measured_seed)) return fail("non-finite measured glove pose or derivatives");
 
     try {
@@ -237,7 +241,7 @@ InverseResult InverseRetarget::solve(const Vec20& actual_hand, const GlovePose& 
         // Undo the forward solve's per-point scaling (points are wrist-relative).
         for (int point = 0; point < 21; ++point)
             for (int axis = 0; axis < 3; ++axis) target[3 * point + axis] /= scales_[point];
-        if (!finite_array(target)) return fail("Hand2 forward kinematics produced non-finite points");
+        if (!finite_array(target)) return fail("hand forward kinematics produced non-finite points");
         const GlovePose& initial = has_warm_pose_ ? warm_pose_ : measured_seed;
         const Bounds active = glove_.active_joint_bounds(initial);
         Vec12 lower{}, upper{}, q{};
@@ -472,4 +476,6 @@ InverseResult InverseRetarget::solve(const Vec20& actual_hand, const GlovePose& 
     return result;
 }
 
+template class CommonInverseRetarget<20>;
+template class CommonInverseRetarget<22>;
 }  // namespace motorhand::native

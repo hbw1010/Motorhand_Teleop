@@ -1,6 +1,6 @@
-#include "glove_output.hpp"
+#include "common/glove_output.hpp"
 #include "encos_driver.hpp"
-#include "driver_impedance.hpp"
+#include "common/driver_impedance.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -26,33 +26,34 @@ void check_deadline(std::uint64_t deadline, std::uint64_t now) {
 }
 }
 
-struct GloveOutputWorker::Impl {
+template<std::size_t N>
+struct CommonGloveOutputWorker<N>::Impl {
     enum class Kind { position, force, enter_force, enter_position };
     struct Request {
         Kind kind{};
         std::uint64_t id{}, source{}, deadline{};
         Vec12 position{};
-        Vec20 target{};
-        HandFrame hand{};
+        JointArray<N> target{};
+        HandState<N> hand{};
         GloveFrame glove{};
         GlovePose pose{};
-        std::optional<JacobianSnapshot> jacobian;
+        std::optional<CommonJacobianSnapshot<N>> jacobian;
     };
     EncosDriver& driver;
-    ForceController* force;
-    DriverImpedancePlanner* impedance;
+    HandFeedback<N>* force;
+    CommonDriverImpedancePlanner<N>* impedance;
     std::mutex mutex;
     std::mutex close_mutex;
     std::condition_variable changed;
     std::optional<Request> pending;
-    std::optional<GloveOutputResult> completed;
+    std::optional<CommonGloveOutputResult<N>> completed;
     std::exception_ptr failure;
     std::thread thread;
     GloveOutputMode mode = GloveOutputMode::position;
     std::uint64_t next_id = 0;
     bool barrier = false, closing = false, closed = false;
 
-    Impl(EncosDriver& d, ForceController* f, DriverImpedancePlanner* p) : driver(d), force(f), impedance(p) {
+    Impl(EncosDriver& d, HandFeedback<N>* f, CommonDriverImpedancePlanner<N>* p) : driver(d), force(f), impedance(p) {
         thread = std::thread([this] { run(); });
     }
 
@@ -142,7 +143,7 @@ struct GloveOutputWorker::Impl {
                 check_source(req.source, now);
                 if (req.deadline - req.source > 100000000ULL)
                     throw std::runtime_error("Glove output deadline exceeds source freshness window");
-                GloveOutputResult result;
+                CommonGloveOutputResult<N> result;
                 result.request_id = req.id; result.source_ns = req.source;
                 if (req.kind == Kind::position) {
                     result.mode = GloveOutputMode::position;
@@ -153,9 +154,9 @@ struct GloveOutputWorker::Impl {
                     result.feedback_input_target = req.target;
                     check_source(req.hand.received_ns, now);
                     for (auto stamp : req.glove.received_ns) check_source(stamp, now);
-                    // Zero source marks unavailable geometry. ForceController validates
+                    // Zero source marks unavailable geometry. HandFeedback validates
                     // all real inputs and returns waiting_geometry with zero torque.
-                    static constexpr std::array<double, 240> no_jacobian{};
+                    static constexpr RetargetJacobian<N> no_jacobian{};
                     const auto& jac = req.jacobian ? req.jacobian->jacobian : no_jacobian;
                     const auto& reference = req.jacobian ? req.jacobian->reference_joint_q12 : req.pose.joint_rad;
                     const auto jac_ns = req.jacobian ? req.jacobian->source_ns : 0;
@@ -167,7 +168,7 @@ struct GloveOutputWorker::Impl {
                     check_deadline(req.deadline, now);
                     check_source(req.source, now);
                     if (impedance) {
-                        // ForceController仅作接触判据；旧虚拟力矩不得叠加到驱动PD。
+                        // HandFeedback仅作接触判据；旧虚拟力矩不得叠加到驱动PD。
                         auto geometry = result.force;
                         geometry.active = geometry.active && req.jacobian.has_value();
                         auto plan = impedance->step(req.target,req.hand,req.glove,req.pose,jac,geometry,now);
@@ -201,35 +202,43 @@ struct GloveOutputWorker::Impl {
     }
 };
 
-GloveOutputWorker::GloveOutputWorker(EncosDriver& driver, ForceController* force, DriverImpedancePlanner* impedance)
+template<std::size_t N>
+CommonGloveOutputWorker<N>::CommonGloveOutputWorker(EncosDriver& driver, HandFeedback<N>* force, CommonDriverImpedancePlanner<N>* impedance)
     : impl_(std::make_unique<Impl>(driver, force, impedance)) {}
-GloveOutputWorker::~GloveOutputWorker() { try { close(); } catch (...) {} }
+template<std::size_t N>
+CommonGloveOutputWorker<N>::~CommonGloveOutputWorker() { try { close(); } catch (...) {} }
 
-std::uint64_t GloveOutputWorker::submit_position(const Vec12& motor_rad, std::uint64_t source_ns,
+template<std::size_t N>
+std::uint64_t CommonGloveOutputWorker<N>::submit_position(const Vec12& motor_rad, std::uint64_t source_ns,
                                                  std::uint64_t deadline_ns) {
-    Impl::Request req; req.kind = Impl::Kind::position; req.position = motor_rad;
+    typename Impl::Request req; req.kind = Impl::Kind::position; req.position = motor_rad;
     req.source = source_ns; req.deadline = deadline_ns;
     return impl_->enqueue(std::move(req), GloveOutputMode::position);
 }
-std::uint64_t GloveOutputWorker::submit_force(const Vec20& target, const HandFrame& hand,
+template<std::size_t N>
+std::uint64_t CommonGloveOutputWorker<N>::submit_force(const JointArray<N>& target, const HandState<N>& hand,
                                               const GloveFrame& glove, const GlovePose& pose,
-                                              const std::optional<JacobianSnapshot>& jacobian,
+                                              const std::optional<CommonJacobianSnapshot<N>>& jacobian,
                                               std::uint64_t deadline_ns) {
-    Impl::Request req; req.kind = Impl::Kind::force; req.target = target; req.hand = hand;
+    typename Impl::Request req; req.kind = Impl::Kind::force; req.target = target; req.hand = hand;
     req.glove = glove; req.pose = pose; req.jacobian = jacobian;
     req.source = std::min(hand.received_ns, glove.oldest_ns); req.deadline = deadline_ns;
     return impl_->enqueue(std::move(req), GloveOutputMode::force);
 }
-std::optional<GloveOutputResult> GloveOutputWorker::poll() {
+template<std::size_t N>
+std::optional<CommonGloveOutputResult<N>> CommonGloveOutputWorker<N>::poll() {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     impl_->check_locked();
     auto result = std::move(impl_->completed);
     impl_->completed.reset();
     return result;
 }
-void GloveOutputWorker::enter_force() { impl_->transition(Impl::Kind::enter_force); }
-void GloveOutputWorker::enter_position(std::uint64_t deadline_ns) { impl_->transition(Impl::Kind::enter_position, deadline_ns); }
-void GloveOutputWorker::close() {
+template<std::size_t N>
+void CommonGloveOutputWorker<N>::enter_force() { impl_->transition(Impl::Kind::enter_force); }
+template<std::size_t N>
+void CommonGloveOutputWorker<N>::enter_position(std::uint64_t deadline_ns) { impl_->transition(Impl::Kind::enter_position, deadline_ns); }
+template<std::size_t N>
+void CommonGloveOutputWorker<N>::close() {
     auto& d = *impl_;
     std::lock_guard<std::mutex> close_lock(d.close_mutex);
     {
@@ -240,4 +249,6 @@ void GloveOutputWorker::close() {
     std::lock_guard<std::mutex> lock(d.mutex);
     if (d.failure) std::rethrow_exception(d.failure);
 }
+template class CommonGloveOutputWorker<20>;
+template class CommonGloveOutputWorker<22>;
 } // namespace motorhand::native

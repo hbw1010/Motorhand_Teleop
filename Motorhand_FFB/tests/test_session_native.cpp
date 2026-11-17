@@ -2,6 +2,8 @@
 // wuji_identity.cpp and encos_driver.cpp; see the main-agent handoff for the
 // production sources and libraries. No physical device API is linked here.
 #include "motorhand_teleop/real_hand/native_control/session.hpp"
+#include "motorhand_teleop/real_hand/native_control/common/session.hpp"
+#include "motorhand_teleop/real_hand/native_control/common/force_jacobian.hpp"
 #include "motorhand_teleop/real_hand/native_control/trajectory.hpp"
 #include "motorhand_teleop/real_hand/native_control/wuji_device.hpp"
 #include "motorhand_teleop/real_hand/native_control/encos_driver.hpp"
@@ -491,10 +493,110 @@ void driver_impedance_session(const Fixture& f) {
     session.stop();sim.stop();no_expired_commands();
 }
 
+
+// 实际共用状态机必须保留第21/22轴，并在接管/恢复时连续；缓存不续期。
+class Fake22 final : public HandDevice<22> {
+public:
+    HandDescriptor<22> desc; HandState<22> state; JointArray<22> last{};
+    int enables{},homes{},sends{},disables{},closes{};bool frozen{};
+    Fake22(){desc.identity={"fake22","offline22","test",false};desc.lower_rad.fill(-2);desc.upper_rad.fill(2);
+        desc.online_source=HandStatusSource::complete_state_packet;desc.enabled_source=HandStatusSource::device_report;
+        desc.load_unit=HandLoadUnit::newton_metre;desc.load_source="fake-torque";
+        for(int i=0;i<22;++i)desc.joint_names[i]="j"+std::to_string(i);
+        state.identity=desc.identity;state.load_unit=desc.load_unit;state.load_source=desc.load_source;
+        state.online_source=desc.online_source;state.enabled_source=desc.enabled_source;
+        state.online.fill(true);state.has_load=state.has_velocity=true;}
+    void connect() override {state.connected=true;}
+    HandState<22> read() override {if(!frozen)state.received_ns=now_ns();return state;}
+    const HandDescriptor<22>& descriptor() const override{return desc;}
+    void enable() override{++enables;state.enabled.fill(true);}
+    void home(const std::atomic<bool>*) override{++homes;}
+    void send(const JointArray<22>& q,std::uint64_t until) override{check(now_ns()<until,"22轴输出超过原始期限");last=q;state.position_rad=q;++sends;}
+    void disable() override{++disables;state.enabled.fill(false);}
+    void close() override{++closes;}
+};
+class FakeModel22 final : public HandModel<22> {
+public:
+    Points points;explicit FakeModel22(Points p):points(p){}
+    JointArray<22> solve(const Points& p) override{JointArray<22> q{};q[20]=.4+p[24];q[21]=-.6+2*p[12];return q;}
+    Points hand_points(const JointArray<22>&) override{return points;}
+    std::array<double,21> task_scales() const override{std::array<double,21>s;s.fill(1);return s;}
+    void seed(const JointArray<22>&) override{} void reset() override{}
+    void set_initial_hint(const JointArray<22>*) override{}
+    std::unique_ptr<HandModel<22>> create_solver(bool=false)const override{return std::make_unique<FakeModel22>(points);}
+};
+
+class FakeFeedback22 final : public HandFeedback<22> {
+public:
+    void set_motor_limits(const Vec12&,const Vec12&) override{}
+    void reset(std::uint64_t) override{}
+    void acknowledge_torque(const Vec12&) override{}
+    FeedbackResult<22> step(const JointArray<22>&,const HandState<22>& hand,const GloveFrame&,const GlovePose&,
+        const RetargetJacobian<22>& jac,const Vec12&,std::uint64_t source,std::uint64_t) override {
+        check(hand.load_unit==HandLoadUnit::newton_metre&&hand.load_source=="fake-torque","22轴负载单位/来源丢失");
+        FeedbackResult<22> out;out.active=source!=0;out.contact[21]=out.active;
+        out.virtual_hand_nm[21]=out.active?-.3:0;out.projection_load=hand.load;
+        out.projection_received_ns=hand.received_ns;out.model_motor_nm[0]=out.active?.1:0;
+        if(source) {double norm=0;for(int col=0;col<12;++col)norm+=std::abs(jac[21*12+col]);check(norm>1e-5,"Jacobian第22行未到达输出线程");}
+        return out;
+    }
+};
+void common_geometry22(const Fixture& f) {
+    Ve33Model glove(f.options.asset_root,false);auto zero=glove.zero();
+    CommonForceJacobianColumns<22> calculator(f.options.asset_root,[points=zero.points_m]{return std::make_unique<FakeModel22>(points);},false);
+    auto values=calculator.compute(zero,{0,1,2,3,4,5,6,7,8,9,10,11},.001);
+    check(values.size()==264,"22x12 Jacobian形状错误");double last_norm=0;
+    for(int col=0;col<12;++col) {
+        check(std::abs(values[21*12+col]-2*zero.point_jacobian[12*12+col])<1e-4,"末轴Jacobian不符合独立解析导数");
+        last_norm+=std::abs(values[21*12+col]);
+    }
+    check(last_norm>1e-5,"假模型末轴必须具备可观测几何");
+}
+void common_async_session22(const Fixture& f) {
+    sim.reset({});sim.start();auto o=f.options;o.force_feedback=true;o.transition_ns=10'000'000;
+    Ve33Model glove(o.asset_root,false);auto device=std::make_unique<Fake22>();auto* hand=device.get();hand->state.load[21]=.7;
+    ControlSession<22> session(o,std::move(device),std::make_unique<FakeModel22>(glove.zero().points_m),std::make_unique<FakeFeedback22>());
+    session.connect();session.enable();JointArray<22> command{};command[21]=-.2;
+    bool inverse=false;auto next=Clock::now();
+    for(int i=0;i<80&&!inverse;++i){auto tick=session.step_inference(command,now_ns());inverse=tick.inverse_fresh&&tick.glove_submit_ns;
+        next+=std::chrono::milliseconds(20);std::this_thread::sleep_until(next);}
+    check(inverse,"22轴共同异步逆解没有驱动手套跟随");
+    session.request_takeover(true);bool feedback=false;next=Clock::now();
+    for(int i=0;i<80&&!feedback;++i){auto tick=session.step_takeover();
+        feedback=tick.force_commanded&&tick.force_geometry_valid&&tick.contact[21]&&tick.virtual_hand_nm[21]==-.3;
+        if(feedback){check(tick.feedback_input_hand.load[21]==.7&&tick.projection_load[21]==.7,"22轴反馈末轴或负载来源被裁剪");
+            check(tick.glove_output_source_ns&&tick.glove_output_source_ns<=tick.feedback_input_hand.received_ns&&
+                tick.glove_submit_ns<tick.glove_output_source_ns+100'000'000,"输出必须保留原始反馈时间");
+            check(tick.feedback_input_hand.enabled_source==HandStatusSource::device_report&&
+                tick.feedback_input_hand.online_source==HandStatusSource::complete_state_packet,"不得把整手使能或完整状态包伪装成逐轴诊断");}
+        next+=std::chrono::milliseconds(20);std::this_thread::sleep_until(next);}
+    check(feedback,"22轴共同Jacobian/反馈/输出路径未闭合");
+    session.request_takeover(false);session.step_inference(command,now_ns());session.stop();sim.stop();no_expired_commands();
+}
+
+void common_session22(const Fixture& f){
+    sim.reset({});sim.start();auto o=f.options;o.force_feedback=false;o.glove_output=false;o.transition_ns=1;
+    Ve33Model glove(o.asset_root,false);auto device=std::make_unique<Fake22>();auto* hand=device.get();
+    ControlSession<22> session(o,std::move(device),std::make_unique<FakeModel22>(glove.zero().points_m));
+    session.connect();auto sample=session.read_hand_state();
+    check(hand->enables==0&&hand->homes==0&&hand->sends==0,"共同连接/读取必须只读");
+    session.enable();JointArray<22> command{};command[20]=.25;command[21]=-.35;
+    session.step_inference(command,now_ns());auto before=session.step_inference(command,now_ns());
+    check(before.hand_target[20]==.25&&before.hand_target[21]==-.35,"共同推理丢失22轴末尾数据");
+    session.request_takeover(true);auto taken=session.step_takeover();
+    check(taken.hand_target==before.hand_target,"22轴接管必须保持最后确认目标");
+    session.request_takeover(false);auto resumed=session.step_inference(command,now_ns());
+    check(resumed.hand_target==taken.hand_target,"22轴恢复推理必须连续");
+    hand->frozen=true;hand->state.received_ns=now_ns()-100'000'000;const int sent=hand->sends;
+    must_throw([&]{session.step_inference(command,now_ns());},"重复缓存不能续期");
+    check(hand->sends==sent&&hand->disables==1&&hand->closes==1,"过期反馈必须停止并释放自身设备");
+    sim.stop();
+}
+
 int main(int argc, char** argv) {
     try {
         auto root=argc>1 ? std::filesystem::absolute(argv[1]) : std::filesystem::current_path();
-        Fixture f(root); driver_impedance_session(f); zero_aligned_start(f); zero_aligned_saturation(f); replay_takeover_and_resume(f); grasp_handover(f); fault_case(f,true); fault_case(f,false); asynchronous_glove_fault(f); linear_feedback(f);
+        Fixture f(root); common_geometry22(f); common_session22(f); common_async_session22(f); driver_impedance_session(f); zero_aligned_start(f); zero_aligned_saturation(f); replay_takeover_and_resume(f); grasp_handover(f); fault_case(f,true); fault_case(f,false); asynchronous_glove_fault(f); linear_feedback(f);
         std::cout<<"Offline native Session integration passed\n"; return 0;
     } catch (const std::exception& e) {
         sim.stop(); std::cerr<<"Offline native Session integration failed: "<<e.what()<<'\n'; return 1;

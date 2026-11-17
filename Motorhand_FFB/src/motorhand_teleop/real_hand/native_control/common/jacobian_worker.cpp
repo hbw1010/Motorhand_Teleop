@@ -1,5 +1,5 @@
-#include "jacobian_worker.hpp"
-#include "force_jacobian.hpp"
+#include "common/jacobian_worker.hpp"
+#include "common/force_jacobian.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -18,13 +18,15 @@ template <class Array> bool finite(const Array& values) {
 }
 }
 
-struct JacobianWorker::Impl {
+template<std::size_t N>
+struct CommonJacobianWorker<N>::Impl {
     struct Request {
         GlovePose pose;
         std::uint64_t source_ns;
         std::uint64_t id;
     };
-    const std::filesystem::path asset_root, yaml_path;
+    const std::filesystem::path asset_root;
+    HandModelFactory<N> hand_factory;
     const bool left;
     const double step;
     std::mutex mutex;
@@ -34,14 +36,14 @@ struct JacobianWorker::Impl {
     std::exception_ptr failure;
     std::uint64_t next_id = 0;
     std::optional<Request> current, pending;
-    std::optional<JacobianSnapshot> ready;
-    std::array<std::array<double, 60>, 4> parts{};
+    std::optional<CommonJacobianSnapshot<N>> ready;
+    std::array<std::array<double, N*3>, 4> parts{};
     std::array<bool, 4> finished{};
     std::size_t count = 0;
 
-    Impl(const std::filesystem::path& assets, const std::filesystem::path& yaml,
+    Impl(const std::filesystem::path& assets, HandModelFactory<N> factory,
          bool is_left, double difference_step)
-        : asset_root(assets), yaml_path(yaml), left(is_left), step(difference_step) {
+        : asset_root(assets), hand_factory(std::move(factory)), left(is_left), step(difference_step) {
         if (!std::isfinite(step) || step <= 0) throw std::invalid_argument("invalid Jacobian difference step");
         try {
             for (std::size_t i = 0; i < threads.size(); ++i)
@@ -72,7 +74,7 @@ struct JacobianWorker::Impl {
     }
     void run(std::size_t index) noexcept {
         try {
-            ForceJacobianColumns calculator(asset_root, yaml_path, left);
+            CommonForceJacobianColumns<N> calculator(asset_root, hand_factory, left);
             const std::vector<int> columns{static_cast<int>(index * 3),
                                            static_cast<int>(index * 3 + 1),
                                            static_cast<int>(index * 3 + 2)};
@@ -87,7 +89,7 @@ struct JacobianWorker::Impl {
                 }
                 // All four calculations use the identical validated centre/assembly branch.
                 const auto values = calculator.compute(work.pose, columns, step);
-                if (values.size() != 60 || !finite(values))
+                if (values.size() != N*3 || !finite(values))
                     throw std::runtime_error("invalid Jacobian worker result");
                 {
                     std::lock_guard<std::mutex> lock(mutex);
@@ -99,11 +101,11 @@ struct JacobianWorker::Impl {
                     finished[index] = true;
                     previous = work.id;
                     if (++count == 4) {
-                        JacobianSnapshot result;
+                        CommonJacobianSnapshot<N> result;
                         result.reference_joint_q12 = work.pose.joint_rad;
                         result.source_ns = work.source_ns;
                         result.request_id = work.id;
-                        for (std::size_t row = 0; row < 20; ++row)
+                        for (std::size_t row = 0; row < N; ++row)
                             for (std::size_t part = 0; part < 4; ++part)
                                 for (std::size_t col = 0; col < 3; ++col)
                                     result.jacobian[row * 12 + part * 3 + col] = parts[part][row * 3 + col];
@@ -131,11 +133,14 @@ struct JacobianWorker::Impl {
     }
 };
 
-JacobianWorker::JacobianWorker(const std::filesystem::path& asset_root,
-                               const std::filesystem::path& yaml_path, bool left, double step_rad)
-    : impl_(std::make_unique<Impl>(asset_root, yaml_path, left, step_rad)) {}
-JacobianWorker::~JacobianWorker() = default;
-std::uint64_t JacobianWorker::submit(const GlovePose& pose, std::uint64_t source_ns) {
+template<std::size_t N>
+CommonJacobianWorker<N>::CommonJacobianWorker(const std::filesystem::path& asset_root,
+                               HandModelFactory<N> hand_factory, bool left, double step_rad)
+    : impl_(std::make_unique<Impl>(asset_root, std::move(hand_factory), left, step_rad)) {}
+template<std::size_t N>
+CommonJacobianWorker<N>::~CommonJacobianWorker() = default;
+template<std::size_t N>
+std::uint64_t CommonJacobianWorker<N>::submit(const GlovePose& pose, std::uint64_t source_ns) {
     if (!source_ns || !finite(pose.joint_rad) || !finite(pose.motor_rad) || !finite(pose.tree_rad) ||
         !finite(pose.points_m) || !finite(pose.point_jacobian) || !finite(pose.motor_jacobian) ||
         !std::isfinite(pose.max_gap_m)) throw std::invalid_argument("invalid Jacobian source pose or time");
@@ -143,12 +148,13 @@ std::uint64_t JacobianWorker::submit(const GlovePose& pose, std::uint64_t source
     impl_->rethrow_failure();
     if (impl_->next_id == std::numeric_limits<std::uint64_t>::max())
         throw std::overflow_error("Jacobian request ID exhausted");
-    const Impl::Request request{pose, source_ns, ++impl_->next_id};
+    const typename CommonJacobianWorker<N>::Impl::Request request{pose, source_ns, ++impl_->next_id};
     if (impl_->current) impl_->pending = request;
     else impl_->launch(request);
     return request.id;
 }
-std::optional<JacobianSnapshot> JacobianWorker::poll() {
+template<std::size_t N>
+std::optional<CommonJacobianSnapshot<N>> CommonJacobianWorker<N>::poll() {
     std::unique_lock<std::mutex> lock(impl_->mutex, std::try_to_lock);
     if (!lock.owns_lock()) return std::nullopt;
     impl_->rethrow_failure();
@@ -156,4 +162,6 @@ std::optional<JacobianSnapshot> JacobianWorker::poll() {
     impl_->ready.reset();
     return result;
 }
+template class CommonJacobianWorker<20>;
+template class CommonJacobianWorker<22>;
 } // namespace motorhand::native

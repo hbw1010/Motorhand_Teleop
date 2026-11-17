@@ -1,4 +1,4 @@
-#include "force_jacobian.hpp"
+#include "common/force_jacobian.hpp"
 
 #include <array>
 #include <cmath>
@@ -20,14 +20,14 @@ void validate_request(const Vec12& q, const std::vector<int>& columns, double st
 }
 }  // namespace
 
-ForceJacobianColumns::ForceJacobianColumns(const std::filesystem::path& asset_root,
-                                           const std::filesystem::path& yaml_path,
+template<std::size_t N>
+CommonForceJacobianColumns<N>::CommonForceJacobianColumns(const std::filesystem::path& asset_root,
+                                           HandModelFactory<N> hand_factory,
                                            bool left)
-    : model_(asset_root, left), retarget_(yaml_path, left) {
-    retarget_.configure_differentiation();
-}
+    : model_(asset_root, left), retarget_(hand_factory()) {}
 
-std::vector<double> ForceJacobianColumns::compute(const Vec12& q,
+template<std::size_t N>
+std::vector<double> CommonForceJacobianColumns<N>::compute(const Vec12& q,
                                                    const std::vector<int>& columns,
                                                    double step_rad) {
     validate_request(q, columns, step_rad);
@@ -36,7 +36,8 @@ std::vector<double> ForceJacobianColumns::compute(const Vec12& q,
     return compute_centre(q, centre, columns, step_rad);
 }
 
-std::vector<double> ForceJacobianColumns::compute(const GlovePose& base_pose,
+template<std::size_t N>
+std::vector<double> CommonForceJacobianColumns<N>::compute(const GlovePose& base_pose,
                                                    const std::vector<int>& columns,
                                                    double step_rad) {
     validate_request(base_pose.joint_rad, columns, step_rad);
@@ -51,27 +52,28 @@ std::vector<double> ForceJacobianColumns::compute(const GlovePose& base_pose,
     return compute_centre(base_pose.joint_rad, centre, columns, step_rad);
 }
 
-std::vector<double> ForceJacobianColumns::compute_centre(const Vec12& q,
+template<std::size_t N>
+std::vector<double> CommonForceJacobianColumns<N>::compute_centre(const Vec12& q,
                                                           const GlovePose& centre,
                                                           const std::vector<int>& columns,
                                                           double step_rad) {
-    retarget_.reset();
-    retarget_.set_initial_hint(nullptr);
-    const Vec20 hint = retarget_.solve(centre.points_m);
-    retarget_.set_initial_hint(&hint);
+    retarget_->reset();
+    retarget_->set_initial_hint(nullptr);
+    const JointArray<N> hint = retarget_->solve(centre.points_m);
+    retarget_->set_initial_hint(&hint);
 
-    std::vector<double> result(20 * columns.size());
+    std::vector<double> result(N * columns.size());
     for (std::size_t k = 0; k < columns.size(); ++k) {
         Vec12 plus = q, minus = q;
         plus[columns[k]] += step_rad;
         minus[columns[k]] -= step_rad;
         const auto plus_pose = model_.evaluate_joints(plus, &centre);
         const auto minus_pose = model_.evaluate_joints(minus, &centre);
-        retarget_.reset();
-        const Vec20 plus_hand = retarget_.solve(plus_pose.points_m);
-        retarget_.reset();
-        const Vec20 minus_hand = retarget_.solve(minus_pose.points_m);
-        for (std::size_t row = 0; row < 20; ++row) {
+        retarget_->reset();
+        const JointArray<N> plus_hand = retarget_->solve(plus_pose.points_m);
+        retarget_->reset();
+        const JointArray<N> minus_hand = retarget_->solve(minus_pose.points_m);
+        for (std::size_t row = 0; row < N; ++row) {
             const double value = (plus_hand[row] - minus_hand[row]) / (2.0 * step_rad);
             if (!std::isfinite(value)) throw std::runtime_error("non-finite retarget Jacobian");
             result[row * columns.size() + k] = value;
@@ -82,4 +84,6 @@ std::vector<double> ForceJacobianColumns::compute_centre(const Vec12& q,
     return result;
 }
 
+template class CommonForceJacobianColumns<20>;
+template class CommonForceJacobianColumns<22>;
 }  // namespace motorhand::native

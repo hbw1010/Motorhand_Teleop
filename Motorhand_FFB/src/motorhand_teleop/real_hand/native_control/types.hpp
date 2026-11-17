@@ -32,14 +32,16 @@ struct DriverAxisObservation {
         proxy_limited |= other.proxy_limited; reasons |= other.reasons;
     }
 };
-struct DriverImpedanceObservation {
+template<std::size_t N> struct CommonDriverImpedanceObservation {
     Vec12 proxy_surface_rad{}, input_rad{}, filtered_velocity_rad_s{}; // 模型电机轴。
     std::array<std::uint64_t,12> source_ns{};
     std::array<int,12> blocking_direction{};
     std::array<bool,12> proxy_valid{};
-    std::array<bool,20> impedance_contact{}; // 实际纳入本次局部逆解的Wuji行。
+    std::array<bool,N> impedance_contact{}; // 实际纳入本次局部逆解的Wuji行。
     std::array<DriverAxisObservation,12> axes{};
 };
+
+using DriverImpedanceObservation = CommonDriverImpedanceObservation<20>;
 
 // MIT命令均为GLOVE_JOINTS模型电机轴；velocity仅用于提交时名义估算。
 struct DriverImpedanceCommand {

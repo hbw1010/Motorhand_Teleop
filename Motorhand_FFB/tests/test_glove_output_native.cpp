@@ -88,6 +88,7 @@ std::array<std::uint64_t, 12> EncosDriver::last_command_write_ns() const {
     std::lock_guard<std::mutex> lock(fake.mutex); return fake.stamps;
 }
 ForceController::ForceController(const std::string&, const std::string&, const Vec12&, const Vec12&, const std::array<int, 12>&, bool) {}
+void ForceController::set_motor_limits(const Vec12&,const Vec12&) {}
 void ForceController::reset(std::uint64_t) {
     std::lock_guard<std::mutex> lock(fake.mutex); fake.events.push_back("reset");
 }
