@@ -272,9 +272,9 @@ const HandDescriptor<N>& ControlSession<N>::connect() {
         if (s.options.force_feedback) {
             s.force->set_motor_limits(lo, hi);
             if (s.options.driver_impedance_feedback) {
-                auto config = load_driver_impedance_config(s.options.driver_impedance_config.string());
-                if (s.options.driver_impedance_torque_margin)
-                    config.torque_margin = *s.options.driver_impedance_torque_margin;
+                const auto config = s.options.driver_impedance_override
+                    ? *s.options.driver_impedance_override
+                    : load_driver_impedance_config(s.options.driver_impedance_config.string());
                 s.impedance = std::make_unique<CommonDriverImpedancePlanner<N>>(
                     config,s.options.feedback_hardness,cal);
             }

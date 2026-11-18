@@ -11,6 +11,7 @@ struct DriverImpedanceConfig {
     double lookahead_s=.02, damping_off_velocity=.15, damping_on_velocity=.05;
     double torque_margin=default_impedance_torque_margin;
     double surface_rate=1, inverse_regularization=.01, max_proxy_offset=.15, ramp_s=.15;
+    double surface_acceleration=0; // rad/s²。0 沿用仅限速的目标更新。
     double velocity_filter_hz=12, velocity_deadband=.02, velocity_scale=.08, friction_gain=1, friction_max=.6;
     Vec12 coulomb_nm{.25,.10,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25};
     double viscous=0;

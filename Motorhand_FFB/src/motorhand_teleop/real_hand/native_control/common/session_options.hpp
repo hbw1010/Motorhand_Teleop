@@ -1,4 +1,5 @@
 #pragma once
+#include "common/driver_impedance_config.hpp"
 #include <atomic>
 #include <cmath>
 #include <stdexcept>
@@ -16,7 +17,7 @@ struct ControlOptions {
     bool linear_force_feedback = false;
     bool driver_impedance_feedback = false; // force-contact CLI默认启用；其他调用保留旧模式。
     std::filesystem::path driver_impedance_config;
-    std::optional<double> driver_impedance_torque_margin;
+    std::optional<DriverImpedanceConfig> driver_impedance_override;
     double feedback_hardness = 0.3; // 人工设定，非物体硬度估计。
     bool left = false;
     // 独立力反馈遥操：两侧各自回零，使用固定的手套零位重定向参考。

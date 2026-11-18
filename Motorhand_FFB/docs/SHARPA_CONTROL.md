@@ -106,7 +106,8 @@ pixi run sharpa-takeover recordings/sharpa-sim.jsonl \
 - `fit_report.json`与`simulation_validation.json`分别记录几何/比例拟合和实际MuJoCo积分结果；这些是仿真配置，不是穿戴或实物标定。
 - 独立Sharpa遥操使用绝对几何目标，经原有0.5秒过渡进入；不再减去零位映射，否则会抵消已拟合的固定关节目标。过渡期间只在Sharpa反馈策略中卸力，完成后恢复反馈。回放接管仍保留原有抓握过渡语义。逆向拇指辅助中点与MCP共用同一比例，保证中点约束。
 - `config/feedback/sharpa-{right,left}.json` 保存 Sharpa SDK 关节力矩的偏置、符号、名义负载参考和 Motorhand 各轴的名义力矩限额。接触模式读取仓库根目录下的 `config/feedback/wuji-contact-impedance-right.json`，使用相同的受阻判定与滤波参数。电流门槛除以 Wuji 参考电流得到负载比例，再乘 Sharpa 各轴参考力矩得到 Nm 门槛。
-- 接触模式读取根目录下的 `config/feedback/wuji-driver-impedance-right.json`，在 Sharpa 入口将阻抗预算系数设为 95%。Motorhand 的 12 轴配置上限均为 10 Nm，对应每轴 9.5 Nm 的名义阻抗预算。预算用于估算提交时刻的阻抗指令力矩。
+- 接触模式读取根目录下的 `config/feedback/wuji-driver-impedance-right.json`。Sharpa 入口使用 95% 的阻抗预算系数，Motorhand 的 12 轴接触增益统一为 2.7。默认硬度下，各轴接触刚度均为 58.05 Nm/rad。Motorhand 的 12 轴配置上限均为 10 Nm，对应每轴 9.5 Nm 的名义阻抗预算。预算用于估算提交时刻的阻抗指令力矩。
+- Sharpa 阻挡目标在模型电机轴上以 0.25 rad/s 限速、5 rad/s² 限加速度。控制器按新鲜姿态时间差更新目标速度并积分角度，接触时从零速度渐入，撤力时清除阻挡目标和目标速度。
 - 真机负载来源为`sharpa-sdk-reported-joint-torque`；仿真负载来源为`sharpa-mujoco-contact-joint-torque`。仿真只投影手与物体接触，不把驱动内力或关节限位反力混进接触源。
 - 用户提供资产的`provenance.json`保留其历史来源；本轮实际运行实现为`native_control/hands/sharpa/`的C++代码，不导入其中记录的其他工程路径。
 

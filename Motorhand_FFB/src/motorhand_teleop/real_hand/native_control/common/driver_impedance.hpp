@@ -17,7 +17,8 @@ public:
 private:
     DriverImpedanceConfig config_; double hardness_;
     std::array<EncosMotorCalibration,12> calibration_; MotorVelocityEstimator velocity_;
-    std::array<int,12> direction_{}; std::array<bool,12> damping_{};Vec12 surface_{};
+    std::array<int,12> direction_{}; std::array<bool,12> damping_{};
+    Vec12 surface_{}, surface_velocity_{};
     std::uint64_t reset_ns_{},source_ns_{};
 };
 }

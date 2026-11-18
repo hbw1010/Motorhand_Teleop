@@ -74,7 +74,8 @@ template<std::size_t N>
 CommonDriverImpedancePlanner<N>::CommonDriverImpedancePlanner(DriverImpedanceConfig c,double hardness,const std::array<EncosMotorCalibration,12>& cal)
 :config_(c),hardness_(hardness),calibration_(cal),velocity_(c.velocity_filter_hz){
     for(double x:{c.stiffness_min,c.stiffness_max,c.gain,c.damping_s,c.damping_max,c.lookahead_s,c.damping_off_velocity,
-        c.damping_on_velocity,c.torque_margin,c.surface_rate,c.inverse_regularization,c.max_proxy_offset,c.ramp_s,
+        c.damping_on_velocity,c.torque_margin,c.surface_rate,c.surface_acceleration,
+        c.inverse_regularization,c.max_proxy_offset,c.ramp_s,
         c.velocity_deadband,c.velocity_scale,c.friction_gain,c.friction_max,c.viscous})nonnegative(x);
     if(!std::isfinite(hardness)||hardness<0||hardness>1||c.torque_margin>1||c.torque_margin<=0||c.stiffness_max<c.stiffness_min||
         c.velocity_scale<=0||c.inverse_regularization<=0||c.surface_rate<=0||c.max_proxy_offset<=0||
@@ -88,7 +89,9 @@ CommonDriverImpedancePlanner<N>::CommonDriverImpedancePlanner(DriverImpedanceCon
     }
 }
 template<std::size_t N>
-void CommonDriverImpedancePlanner<N>::reset(std::uint64_t now){velocity_.reset();direction_={};damping_={};surface_={};reset_ns_=now;source_ns_=0;}
+void CommonDriverImpedancePlanner<N>::reset(std::uint64_t now){
+    velocity_.reset();direction_={};damping_={};surface_={};surface_velocity_={};reset_ns_=now;source_ns_=0;
+}
 template<std::size_t N>
 CommonDriverImpedancePlan<N> CommonDriverImpedancePlanner<N>::step(const JointArray<N>& target,const HandState<N>& hand,const GloveFrame& g,const GlovePose& pose,
     const RetargetJacobian<N>& jac,const FeedbackResult<N>& contact,std::uint64_t now){
@@ -134,19 +137,35 @@ CommonDriverImpedancePlan<N> CommonDriverImpedancePlanner<N>::step(const JointAr
         bool coupled=false;for(int row=0;row<N;++row)if(contact.contact[row]&&std::abs(a(row,i))>1e-7)coupled=true;
         DriverAxisCommand axis;axis.target_rad=q;
         if(dir){
-            if(direction_[i]!=dir){surface_[i]=q;damping_[i]=false;}
+            if(direction_[i]!=dir){surface_[i]=q;surface_velocity_[i]=0;damping_[i]=false;}
             double desired=q-std::clamp(delta[i],-config_.max_proxy_offset,config_.max_proxy_offset);
             if(std::abs(delta[i])>config_.max_proxy_offset){observed.proxy_limited=true;observed.add(ImpedanceReason::proxy_offset_limited);}
             if(desired<cal.model_min_rad||desired>cal.model_max_rad){observed.motion_limited=true;observed.add(ImpedanceReason::soft_limit_target);}
             desired=std::clamp(desired,cal.model_min_rad,cal.model_max_rad);
-            if(std::abs(desired-surface_[i])>config_.surface_rate*dt){observed.proxy_limited=true;observed.add(ImpedanceReason::proxy_rate_limited);}
-            surface_[i]+=std::clamp(desired-surface_[i],-config_.surface_rate*dt,config_.surface_rate*dt);
+            const double gap=desired-surface_[i];
+            const double max_step=config_.surface_rate*dt;
+            bool surface_limited=std::abs(gap)>max_step;
+            if(config_.surface_acceleration>0 && dt>0){
+                const double velocity_step=config_.surface_acceleration*dt;
+                // 给本拍位移和后续制动都留出距离，接近目标时连续减速。
+                const double braking_speed=std::sqrt(velocity_step*velocity_step+2*config_.surface_acceleration*std::abs(gap))-velocity_step;
+                const double target_velocity=std::copysign(std::min(config_.surface_rate,braking_speed),gap);
+                auto& velocity=surface_velocity_[i];
+                velocity+=std::clamp(target_velocity-velocity,-velocity_step,velocity_step);
+                const double next=surface_[i]+velocity*dt;
+                surface_[i]=std::clamp(next,cal.model_min_rad,cal.model_max_rad);
+                if(surface_[i]!=next)velocity=0;
+                surface_limited=std::abs(desired-surface_[i])>1e-9;
+            }else{
+                surface_[i]+=std::clamp(gap,-max_step,max_step);
+            }
+            if(surface_limited){observed.proxy_limited=true;observed.add(ImpedanceReason::proxy_rate_limited);}
             // 留出位置、增益、速度零码与tau_ff零码的最坏近似编码余量。
             const double reserve=.003/factor+k*factor*10./65535.+.062/factor/factor*std::abs(q-surface_[i])+
                                  .005/factor/factor*std::abs(dq)+.5*.003/factor;
             axis=plan_driver_axis(q,dq,surface_[i],dir,k,cap,reserve,config_,damping_[i],&observed);
         }else{
-            surface_[i]=q;damping_[i]=false;
+            surface_[i]=q;surface_velocity_[i]=0;damping_[i]=false;
             observed.add(coupled?ImpedanceReason::coupled_release:ImpedanceReason::free_axis);
             if(!coupled&&!config_.friction_enabled)observed.add(ImpedanceReason::friction_disabled);
             if(!coupled&&config_.friction_enabled){const double moving=std::copysign(std::max(0.,std::abs(dq)-config_.velocity_deadband),dq);

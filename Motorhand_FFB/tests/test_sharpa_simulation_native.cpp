@@ -23,7 +23,7 @@ void run_for(SharpaDevice& d,const JointArray<22>& q,int milliseconds){
  const auto end=Clock::now()+std::chrono::milliseconds(milliseconds);
  while(Clock::now()<end){d.send(q,now_ns()+hand_timeout_ns);std::this_thread::sleep_for(std::chrono::milliseconds(10));}
 }
-void glove_respects_impedance_budget() {
+std::array<EncosMotorCalibration, 12> calibrated_glove(double torque_limit_nm) {
  std::array<EncosMotorCalibration, 12> calibration{};
  for (std::size_t i = 0; i < calibration.size(); ++i) {
   auto& axis = calibration[i];
@@ -31,9 +31,13 @@ void glove_respects_impedance_budget() {
   axis.sign = axis.scale = 1;
   axis.model_min_rad = -1;
   axis.model_max_rad = 1;
-  axis.raw_torque_limit_nm = 4;
+  axis.raw_torque_limit_nm = torque_limit_nm;
   axis.has_torque_limit = true;
  }
+ return calibration;
+}
+void glove_respects_impedance_budget() {
+ const auto calibration = calibrated_glove(4);
  FakeGlove glove(calibration);
  glove.connect();
  glove.home();
@@ -74,8 +78,67 @@ void glove_respects_impedance_budget() {
  const double torque = std::abs(submitted.nominal_nm[5]);
  check(torque > 3.7 && torque <= 3.8, "仿真提交应使用规划器的95%预算");
 }
+void contact_surface_builds_and_releases_force() {
+ DriverImpedanceConfig config;
+ config.torque_margin = .95;
+ config.joint_gain.fill(2.7);
+ config.surface_rate = .25;
+ config.surface_acceleration = 5;
+ config.ramp_s = 0;
+ CommonDriverImpedancePlanner<22> planner(config, 1, calibrated_glove(10));
+ GlovePose pose;
+ for (int i = 0; i < 12; ++i)
+  pose.motor_jacobian[12 * i + i] = 1;
+ RetargetJacobian<22> jacobian{};
+ jacobian[0] = 1;
+ HandState<22> hand;
+ GloveFrame frame;
+ JointArray<22> target{};
+ target[0] = .1;
+ FeedbackResult<22> contact;
+ contact.active = contact.contact[0] = contact.impedance_contact[0] = true;
+ contact.contact_direction[0] = 1;
+ std::uint64_t timestamp = 1'000'000'000;
+ planner.reset(timestamp);
+ auto step = [&] {
+  frame.oldest_ns = timestamp;
+  frame.received_ns.fill(timestamp);
+  const auto result = planner.step(target, hand, frame, pose, jacobian, contact, timestamp);
+  timestamp += 20'000'000;
+  return result;
+ };
+ double previous_position = 0;
+ double previous_velocity = 0;
+ CommonDriverImpedancePlan<22> plan;
+ for (int sample = 0; sample < 40; ++sample) {
+  plan = step();
+  const double velocity = (plan.proxy_surface_rad[0] - previous_position) / .02;
+  check(plan.valid && std::abs(velocity) <= .25 + 1e-9, "阻挡目标必须限速");
+  check(std::abs(velocity - previous_velocity) <= .1 + 1e-9, "阻挡目标必须按加速度渐入");
+  previous_position = plan.proxy_surface_rad[0];
+  previous_velocity = velocity;
+ }
+ check(std::abs(previous_position + .1 / 1.01) < 1e-3, "持续夹持应到达预估阻挡位置");
+ check(std::abs(plan.nominal_nm[0]) > 9 && std::abs(plan.nominal_nm[0]) <= 9.5,
+       "渐入后保持高刚度反馈并遵守名义预算");
+ target[0] = .06;
+ const auto repeated = planner.step(target, hand, frame, pose, jacobian, contact, frame.oldest_ns);
+ check(repeated.proxy_surface_rad[0] == previous_position, "重复采样不能推进阻挡目标");
+ plan = step();
+ const double next_velocity = (plan.proxy_surface_rad[0] - previous_position) / .02;
+ check(std::abs(next_velocity - previous_velocity) <= .1 + 1e-9 && plan.nominal_nm[0] <= 0,
+       "目标回移时应平滑反向且保持原有抵抗方向");
+ contact.impedance_contact[0] = false;
+ plan = step();
+ check(plan.command.kp[0] == 0 && plan.nominal_nm[0] == 0 && plan.proxy_surface_rad[0] == 0,
+       "松手后必须立即清除阻挡目标和PD");
+ contact.impedance_contact[0] = true;
+ plan = step();
+ check(std::abs(plan.proxy_surface_rad[0] + .002) < 1e-9, "再次接触必须从零速度建立阻碍");
+}
 int main(int argc,char**argv){try{
  glove_respects_impedance_budget();
+ contact_surface_builds_and_releases_force();
  auto repo=argc>1?std::filesystem::path(argv[1]):std::filesystem::current_path().parent_path();auto assets=repo/"Motorhand_FFB/assets/sharpa-hand";
 
  {

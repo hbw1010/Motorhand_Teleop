@@ -160,8 +160,14 @@ int run(const sh::EntryOptions& a){
     o.glove_mapping=mapping;o.left=a.left;o.linear_feedback=feedback_path;o.force_feedback=a.feedback;
     o.glove_output=a.feedback||replay;o.linear_force_feedback=linear;
     o.driver_impedance_feedback=a.feedback&&!o.linear_force_feedback&&a.feedback_mode=="driver-impedance";
-    o.driver_impedance_config=wuji_feedback/"wuji-driver-impedance-right.json";
-    o.driver_impedance_torque_margin=.95;
+    if(o.driver_impedance_feedback){
+        auto impedance=load_driver_impedance_config((wuji_feedback/"wuji-driver-impedance-right.json").string());
+        impedance.torque_margin=.95;
+        impedance.joint_gain.fill(2.7);
+        impedance.surface_rate=.25;
+        impedance.surface_acceleration=5.;
+        o.driver_impedance_override=impedance;
+    }
     // Sharpa使用已拟合的绝对任务坐标，不能再减去零位重定向结果。
     // 独立遥操用既有0.5秒过渡进入绝对目标；回放接管保留原抓握偏移语义。
     o.feedback_hardness=a.hardness;o.zero_aligned_start=false;
