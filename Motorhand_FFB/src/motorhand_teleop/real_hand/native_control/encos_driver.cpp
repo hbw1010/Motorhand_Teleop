@@ -749,10 +749,13 @@ Vec12 EncosDriver::write_torque(const Vec12& torque, std::uint64_t deadline_ns) 
 }
 
 DriverImpedanceSubmission EncosDriver::write_impedance(const DriverImpedanceCommand& input, std::uint64_t deadline_ns) {
+    if (!std::isfinite(input.torque_margin) || input.torque_margin<=0 || input.torque_margin>1)
+        throw std::invalid_argument("Invalid Encos impedance torque margin");
     auto& d = *impl_; std::unique_lock<std::mutex> lock(d.mutex);
     d.require_calibrated(); d.require_unlatched(); d.frame_locked(); d.check_deadline(deadline_ns);
     if (!d.homed || !d.force || !d.has_force) throw std::runtime_error("Encos force mode not enabled");
     std::array<Impl::Command,12> next{}; DriverImpedanceSubmission out;
+    out.command.torque_margin=input.torque_margin;
     for (int raw_id=0; raw_id<12; ++raw_id) {
         const auto& m=d.motors[raw_id];const int i=m.index;const double a=m.factor;
         auto& observed=out.observation[i];
@@ -778,7 +781,7 @@ DriverImpedanceSubmission EncosDriver::write_impedance(const DriverImpedanceComm
         }
         const double qt=-5.+pos*10./65535.;
         // 暂态模型预算不是驱动器硬限额，仍保留原始deadline和故障零电流路径。
-        const double budget=.85*d.force_limits[raw_id];
+        const double budget=input.torque_margin*d.force_limits[raw_id];
         if(kp>500.||kd>5.){observed.torque_limited=true;observed.add(ImpedanceReason::sdk_gain_limited);}
         if(std::abs(ff)>budget){observed.torque_limited=true;observed.add(ImpedanceReason::torque_budget_limited);}
         kp=std::min(kp,500.);kd=std::min(kd,5.);ff=std::clamp(ff,-budget,budget);

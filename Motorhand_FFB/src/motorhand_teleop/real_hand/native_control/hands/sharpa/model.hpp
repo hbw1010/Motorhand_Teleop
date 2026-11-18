@@ -4,10 +4,10 @@
 #include <memory>
 
 namespace motorhand::native::sharpa {
-// SDK/URDF顺序的22轴弧度；输入与输出任务点均为腕相对canonical米。
+// SDK/URDF顺序22轴弧度；hand_points是校准后的手套任务域米，物理FK单独提供。
 class Model final : public HandModel<22> {
 public:
-    Model(std::filesystem::path asset_root, bool left);
+    Model(std::filesystem::path asset_root, bool left, std::filesystem::path config_path = {});
     ~Model();
     Model(Model&&) noexcept;
     Model& operator=(Model&&) noexcept;
@@ -20,6 +20,7 @@ public:
     JointArray<22> solve(const Points&) override;
     // 实测FK只要求有限角度，保留动力学软限位超调；命令范围由solve保证。
     Points hand_points(const JointArray<22>&) override;
+    Points physical_hand_points(const JointArray<22>&);
     // 行优先63x22，包含重定向时固定的轴，供实际反馈几何与离线验证使用。
     std::array<double,63*22> point_jacobian(const JointArray<22>&);
     std::array<double,21> task_scales() const override;

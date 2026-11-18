@@ -15,6 +15,7 @@ struct Fake : Transport {
   std::atomic<bool> enabled{};
   bool connected{}, mode_throws{}, auto_packet = true, fault{};
   std::uint64_t query_delay{};
+  std::chrono::milliseconds mode_delay{};
   std::atomic<std::uint64_t> now{2'000'000'000}, system{100'000'000'000};
   Fake() {
     packet.angles.assign(22, .2);
@@ -49,10 +50,16 @@ struct Fake : Transport {
       fresh();
     return packet;
   }
-  void use_sdk_source() override { writes.push_back("source"); }
+  void use_sdk_source() override {
+    assert(!enabled);
+    writes.push_back("source");
+    info.sdk_source = true;
+  }
   void use_position_mode() override {
     writes.push_back("mode");
+    std::this_thread::sleep_for(mode_delay);
     enabled = true;
+    info.position_mode = true;
     if (mode_throws)
       throw std::runtime_error("mode failed after implicit enable");
   }
@@ -264,8 +271,16 @@ void readonly_and_duplicate() {
   assert(a.enabled_source == HandStatusSource::device_report);
   assert(f->writes == std::vector<std::string>({"connect", "start"}));
   f->auto_packet = false;
+  f->packet.angles[21] = .4;
+  f->packet.torques[21] = .3;
   auto b = d.read();
-  assert(b.received_ns == a.received_ns);
+  assert(b.received_ns == a.received_ns && b.position_rad == a.position_rad &&
+         b.load == a.load);
+  f->fresh();
+  const auto c = d.read();
+  assert(c.received_ns > a.received_ns && c.position_rad[21] == .4 &&
+         c.load[21] == .3);
+  f->packet.angles[21] = .6;
   f->now += 100'000'000;
   f->system += 100'000'000;
   rejects([&] { d.read(); });
@@ -281,7 +296,7 @@ void enable_and_home_order() {
   d.connect();
   d.enable();
   assert((f->writes == std::vector<std::string>{"connect", "start", "source",
-                                                "mode", "enable"}));
+                                                "mode"}));
   rejects([&] {
     JointArray<22> q{};
     d.send(q, f->now + 100'000'000);
@@ -297,9 +312,114 @@ void home_then_send() {
   d.home();
   JointArray<22> q{};
   q[21] = .5;
-  d.send(q, f->now + 100'000'000);
-  assert(f->packet.angles[21] > 0);
+  const auto submitted = d.submit_position(q, f->now + 100'000'000);
+  assert(submitted[21] > 0 && submitted[21] < q[21]);
+  assert(std::equal(submitted.begin(), submitted.end(), f->packet.angles.begin()));
   d.disable();
+  d.close();
+}
+void configured_position_mode_does_not_repeat_slow_sdk_setup() {
+  auto t = std::make_unique<Fake>();
+  auto *f = t.get();
+  f->info.sdk_source = true;
+  f->info.position_mode = true;
+  // SDK 5.0.11 的模式切换内部等待超过实时命令的 100 ms 期限。
+  f->mode_delay = std::chrono::milliseconds(120);
+  Device d(options(), descriptor(), std::move(t));
+  d.connect();
+  d.enable();
+  assert((f->writes == std::vector<std::string>{"connect", "start", "enable"}));
+  d.home();
+  assert(f->enabled && !d.stop_status().expired);
+  d.close();
+}
+void late_enable_confirmation_uses_remaining_budget() {
+  struct DelayedEnable final : Fake {
+    std::uint64_t requested{};
+    bool is_enabled() override {
+      if (requested && now - requested >= 94'000'000)
+        enabled = true;
+      return enabled;
+    }
+    void set_enabled(bool value) override {
+      if (!value) {
+        requested = 0;
+        Fake::set_enabled(false);
+        return;
+      }
+      requested = now;
+      writes.push_back("enable");
+      sleep_ns(80'000'000);
+    }
+  };
+  auto t = std::make_unique<DelayedEnable>();
+  auto *f = t.get();
+  f->info.sdk_source = f->info.position_mode = true;
+  Device d(options(), descriptor(), std::move(t));
+  d.connect();
+  d.enable();
+  assert(f->enabled && f->now - f->requested < hand_timeout_ns);
+  d.home();
+  assert(!d.stop_status().expired);
+  d.close();
+}
+void enable_confirmation_requires_fresh_packets() {
+  struct DelayedStatus final : Fake {
+    std::uint64_t requested{};
+    bool freeze_feedback{};
+    bool is_enabled() override {
+      if (requested && now - requested >= 150'000'000)
+        enabled = true;
+      return enabled;
+    }
+    void set_enabled(bool value) override {
+      if (!value) {
+        requested = 0;
+        Fake::set_enabled(false);
+        return;
+      }
+      requested = now;
+      writes.push_back("enable");
+      auto_packet = !freeze_feedback;
+      sleep_ns(80'000'000);
+    }
+  };
+  for (bool freeze : {false, true}) {
+    auto t = std::make_unique<DelayedStatus>();
+    auto *f = t.get();
+    f->info.sdk_source = f->info.position_mode = true;
+    f->freeze_feedback = freeze;
+    Device d(options(), descriptor(), std::move(t));
+    d.connect();
+    if (freeze) {
+      rejects([&] { d.enable(); });
+      assert(!f->enabled);
+    } else {
+      d.enable();
+      assert(f->enabled && f->now - f->requested >= 150'000'000);
+      assert(std::count(f->writes.begin(), f->writes.end(), "enable") == 1);
+    }
+    assert(std::count(f->writes.begin(), f->writes.end(), "position") == 0);
+    d.close();
+  }
+}
+void slow_mode_change_also_revokes_permission() {
+  auto t = std::make_unique<Fake>();
+  auto *f = t.get();
+  f->info.sdk_source = true;
+  f->mode_delay = std::chrono::milliseconds(120);
+  Device d(options(), descriptor(), std::move(t));
+  d.connect();
+  bool diagnosed = false;
+  try {
+    d.enable();
+  } catch (const std::runtime_error &e) {
+    const std::string message = e.what();
+    diagnosed = message.find("切换SDK位置模式") != std::string::npos &&
+                message.find("100ms") != std::string::npos;
+  }
+  assert(diagnosed && d.stop_status().expired && !f->enabled);
+  assert(std::count(f->writes.begin(), f->writes.end(), "position") == 0);
   d.close();
 }
 void implicit_enable_failure() {
@@ -449,6 +569,10 @@ void read_clock_conversion_preserves_packet_age() {
 
 } // namespace
 int main() {
+  configured_position_mode_does_not_repeat_slow_sdk_setup();
+  late_enable_confirmation_uses_remaining_budget();
+  enable_confirmation_requires_fresh_packets();
+  slow_mode_change_also_revokes_permission();
   blocking_sdk_cannot_hold_deadline_monitor();
   unconfirmed_disable_keeps_live_handle();
   fault_message_preserves_sdk_details();

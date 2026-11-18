@@ -6,6 +6,7 @@ using namespace motorhand::native;
 using namespace motorhand::native::sharpa;
 namespace {
 constexpr std::uint64_t stamp = 2'000'000'000;
+const std::filesystem::path wuji_config_dir = "../config/feedback";
 std::array<EncosMotorCalibration, 12> calibration() {
   std::array<EncosMotorCalibration, 12> c{};
   for (int i = 0; i < 12; ++i) {
@@ -56,7 +57,7 @@ template <class F> void rejects(F f) {
   assert(caught);
 }
 void linear_last_axis_and_calibration(const std::string &path) {
-  Feedback f(path, true, calibration());
+  Feedback f(path, wuji_config_dir, true, calibration());
   Vec12 lo, hi;
   lo.fill(-2);
   hi.fill(2);
@@ -82,7 +83,7 @@ void linear_last_axis_and_calibration(const std::string &path) {
   assert(r.projected_motor_nm[0] > 4.9);
 }
 void coupled_projection_cancels(const std::string &path) {
-  Feedback f(path, true, calibration());
+  Feedback f(path, wuji_config_dir, true, calibration());
   Vec12 lo, hi;
   lo.fill(-2);
   hi.fill(2);
@@ -97,7 +98,7 @@ void coupled_projection_cancels(const std::string &path) {
 }
 void missing_and_wrong_units_stop(const std::string &path) {
   for (int i = 0; i < 3; ++i) {
-    Feedback f(path, false, calibration());
+    Feedback f(path, wuji_config_dir, false, calibration());
     Vec12 lo, hi;
     lo.fill(-2);
     hi.fill(2);
@@ -114,7 +115,7 @@ void missing_and_wrong_units_stop(const std::string &path) {
   }
 }
 void contact_and_immediate_opening_release(const std::string &path) {
-  Feedback f(path, false, calibration());
+  Feedback f(path, wuji_config_dir, false, calibration());
   Vec12 lo, hi;
   lo.fill(-2);
   hi.fill(2);
@@ -138,9 +139,58 @@ void contact_and_immediate_opening_release(const std::string &path) {
   r = in.step(f);
   assert(!r.impedance_contact[21] && r.model_motor_nm[0] == 0);
 }
+void thumb_contact_survives_small_target_retreat(const std::string &path) {
+  Feedback feedback(path, wuji_config_dir, false, calibration());
+  Vec12 lower, upper;
+  lower.fill(-2);
+  upper.fill(2);
+  feedback.set_motor_limits(lower, upper);
+  feedback.reset(stamp - 1'000'000'000);
+  Input input;
+  input.jac[0] = 2;
+  input.h.position_rad[0] = .03;
+  input.h.load[0] = .33;
+  input.h.velocity_rad_s[0] = .2;
+  input.target[0] = .10;
+  auto output = input.step(feedback);
+  assert(!output.impedance_contact[0]);
+  for (int frame = 0; frame < 2; ++frame) {
+    input.now += 20'000'000;
+    output = input.step(feedback);
+  }
+  assert(output.impedance_contact[0]);
+  input.now += 20'000'000;
+  input.target[0] -= .0005;
+  assert(input.step(feedback).impedance_contact[0]);
+  input.now += 20'000'000;
+  input.target[0] -= .02;
+  assert(!input.step(feedback).impedance_contact[0]);
+}
+void contact_uses_sharpa_motor_cap(const std::string &path) {
+  const auto axes = calibration();
+  Feedback feedback(path, wuji_config_dir, false, axes);
+  Vec12 lower, upper;
+  lower.fill(-2);
+  upper.fill(2);
+  feedback.set_motor_limits(lower, upper);
+  feedback.reset(stamp - 1'000'000'000);
+  Input input;
+  input.jac[21 * 12] = 400;
+  input.h.load[21] = .189369;
+  input.target[21] = .3;
+  FeedbackResult<22> output;
+  for (int frame = 0; frame < 5; ++frame) {
+    output = input.step(feedback);
+    input.now += 20'000'000;
+  }
+  assert(axes[0].raw_motor_id == 12);
+  assert(output.impedance_contact[21]);
+  const double raw_torque = std::abs(output.model_motor_nm[0] * axes[0].scale);
+  assert(raw_torque > 9.9 && raw_torque <= 10);
+}
 void simulator_source_is_explicit(const std::string &path) {
-  Feedback real(path, true, calibration());
-  Feedback simulated(path, true, calibration(),
+  Feedback real(path, wuji_config_dir, true, calibration());
+  Feedback simulated(path, wuji_config_dir, true, calibration(),
                      "sharpa-mujoco-contact-joint-torque");
   Vec12 lo, hi;
   lo.fill(-2);
@@ -154,12 +204,12 @@ void simulator_source_is_explicit(const std::string &path) {
   rejects([&] { in.step(real); });
   assert(in.step(simulated).active);
   rejects([&] {
-    Feedback invalid(path, true, calibration(), "unverified-source");
+    Feedback invalid(path, wuji_config_dir, true, calibration(), "unverified-source");
   });
 }
 
 void stale_geometry_releases(const std::string &path) {
-  Feedback f(path, false, calibration());
+  Feedback f(path, wuji_config_dir, false, calibration());
   Vec12 lo, hi;
   lo.fill(-2);
   hi.fill(2);
@@ -168,6 +218,15 @@ void stale_geometry_releases(const std::string &path) {
   Input in;
   in.p.motor_jacobian = {};
   rejects([&] { in.step(f); });
+}
+void absolute_start_waits_for_position_transition(const std::string &path) {
+  for(bool linear:{false,true}) {
+    Feedback f(path, wuji_config_dir, linear,calibration(),torque_source,500'000'000);
+    Vec12 lo,hi;lo.fill(-2);hi.fill(2);f.set_motor_limits(lo,hi);f.reset(stamp);
+    Input in;in.h.load[21]=.189369;
+    for(int k=0;k<25;++k){auto r=in.step(f);assert(!r.active);for(double v:r.model_motor_nm)assert(v==0);f.acknowledge_torque(r.model_motor_nm);in.now+=20'000'000;}
+    for(int k=0;k<5;++k){auto r=in.step(f);assert(r.active);f.acknowledge_torque(r.model_motor_nm);in.now+=20'000'000;}
+  }
 }
 } // namespace
 int main(int argc, char **argv) {
@@ -178,6 +237,9 @@ int main(int argc, char **argv) {
   coupled_projection_cancels(path);
   missing_and_wrong_units_stop(path);
   contact_and_immediate_opening_release(path);
+  thumb_contact_survives_small_target_retreat(path);
+  contact_uses_sharpa_motor_cap(path);
   stale_geometry_releases(path);
+  absolute_start_waits_for_position_transition(path);
   std::cout << "Sharpa 22轴Nm反馈数学通过\n";
 }

@@ -21,17 +21,20 @@ public:
   void home(const std::atomic<bool> *stop_requested = nullptr) override;
   void send(const JointArray<22> &,
             std::uint64_t original_deadline_ns) override;
+  JointArray<22> submit_position(const JointArray<22> &,
+                                 std::uint64_t original_deadline_ns) override;
   void disable() override;
   void close() override;
   StopStatus stop_status() const noexcept;
 
 private:
   void ready_locked();
+  Packet read_packet_locked();
   HandState<22> read_locked();
   void disable_locked();
   void fail_locked();
   void wait_enabled_locked(bool);
-  void arm_locked(std::uint64_t, const HandState<22> &);
+  void arm_locked(std::uint64_t source_ns, std::uint64_t received_ns);
   void watchdog();
   void request_stop();
   void check_permission();
@@ -49,7 +52,7 @@ private:
   std::condition_variable cv_;
   std::thread watchdog_;
   bool connected_{}, closed_{}, faulted_{}, owned_{}, active_{}, homed_{},
-      have_packet_{};
+      have_packet_{}, reported_cache_conflict_{};
   std::atomic<bool> stop_watchdog_{};
   std::int64_t clock_offset_{};
   Packet last_packet_;

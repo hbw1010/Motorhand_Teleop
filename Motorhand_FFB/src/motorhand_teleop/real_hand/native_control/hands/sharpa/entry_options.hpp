@@ -8,7 +8,7 @@ namespace motorhand::native::sharpa {
 struct EntryOptions {
     std::string command,serial,pn,firmware="3.0.10",feedback_mode="driver-impedance";
     std::filesystem::path project_root,trajectory,output,mapping;
-    bool left=false,execute=false,simulation=false,fake_glove=false,feedback=false,object=true,help=false;
+    bool left=false,execute=false,simulation=false,fake_glove=false,feedback=false,object=false,help=false;
     int rate=50,port=8766;
     double duration_s=0,hardness=.3,takeover_at_s=-1;
 };
@@ -30,6 +30,7 @@ inline EntryOptions parse_options(const std::vector<std::string>& args) {
         else if(a=="--fake-glove")o.fake_glove=true;
         else if(a=="--feedback")o.feedback=true;
         else if(a=="--no-object")o.object=false;
+        else if(a=="--with-object")o.object=true;
         else if(a=="--help")o.help=true;
         else if(a=="--serial"||a=="--sharpa-serial")o.serial=value();
         else if(a=="--expected-pn")o.pn=value();

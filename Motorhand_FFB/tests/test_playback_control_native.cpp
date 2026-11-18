@@ -60,6 +60,8 @@ void terminal_test() {
     require(slave >= 0, "PTY slave open failed");
     termios before{}, during{}, after{};
     require(tcgetattr(slave, &before) == 0, "PTY tcgetattr failed");
+    before.c_oflag |= OPOST | ONLCR;
+    require(tcsetattr(slave, TCSANOW, &before) == 0, "PTY output flags setup failed");
     const int flags = fcntl(slave, F_GETFL);
     require(flags >= 0, "PTY F_GETFL failed");
     try {
@@ -67,6 +69,13 @@ void terminal_test() {
         require(keys.active(), "TTY not active");
         require(tcgetattr(slave, &during) == 0, "PTY tcgetattr during failed");
         require(!(during.c_lflag & ICANON) && !(during.c_lflag & ECHO) && (during.c_lflag & ISIG), "incorrect terminal mode");
+        require(during.c_oflag == before.c_oflag, "hotkeys changed terminal output flags");
+        require(write(slave,"x\n",2)==2, "PTY output write failed");
+        pollfd output{master,POLLIN,0};
+        require(poll(&output,1,1000)==1 && (output.revents&POLLIN), "PTY output not ready");
+        char line[8]{};
+        require(read(master,line,sizeof(line))==3 && std::string(line,3)=="x\r\n",
+                "PTY newline stopped returning to the first column");
         require((fcntl(slave, F_GETFL) & O_NONBLOCK) != 0, "TTY is blocking");
         require(keys.read() == KeyEvent::none, "unexpected key");
         const char data[] = "xT q";

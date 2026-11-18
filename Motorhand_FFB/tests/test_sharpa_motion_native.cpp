@@ -21,6 +21,20 @@ int main(){
         std::ifstream input(file);std::string line;std::getline(input,line);std::getline(input,line);
         auto raw=nlohmann::json::parse(line);
         if(raw.at("position_rad")[21]!=1.00004||raw.at("target_rad")[21]!=1.0)throw std::runtime_error("实测与回放目标必须分别保留");
-        std::filesystem::remove(file);std::cout<<"Sharpa轨迹回归通过\n";
+        input.close();std::filesystem::remove(file);
+        {
+            MotionRecorder out(file,d,MotionTargetSource::submitted);
+            HandState<22> s;s.received_ns=1000;s.position_rad[21]=.2;
+            JointArray<22> submitted{};submitted[21]=.55;
+            out.append(s,submitted);s.received_ns=2000;out.append(s,submitted);out.finish();
+        }
+        std::ifstream grasp(file);
+        std::getline(grasp,line);
+        if(nlohmann::json::parse(line).at("target_source")!="submitted_position_target")
+            throw std::runtime_error("控制录制必须声明提交目标来源");
+        std::getline(grasp,line);raw=nlohmann::json::parse(line);
+        if(raw.at("position_rad")[21]!=.2||Motion::load(file,d).at(500)[21]!=.55)
+            throw std::runtime_error("受阻录制应保留原始实测及回放所需的握紧目标");
+        grasp.close();std::filesystem::remove(file);std::cout<<"Sharpa轨迹回归通过\n";
     }catch(const std::exception&e){std::filesystem::remove(file);std::cerr<<e.what()<<'\n';return 1;}
 }

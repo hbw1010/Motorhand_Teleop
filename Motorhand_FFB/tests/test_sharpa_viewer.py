@@ -111,3 +111,44 @@ def test_simulation_display_requires_full_model_qpos_and_preserves_state():
     payload["qpos"] = [0.0]
     with pytest.raises(ValueError, match="qpos需要"):
         apply_frame(model, data, validate_frame(payload, ROOT))
+
+
+@pytest.mark.parametrize("tree,order", [([0.] * 67, "ve33_closure_independent_dependent"),
+                                      ([float("nan")] * 68, "ve33_closure_independent_dependent"),
+                                      ([0.] * 68, "unknown")])
+def test_rejects_invalid_glove_tree(tree, order):
+    payload = frame()
+    payload.update(glove_tree_rad=tree, glove_tree_order=order)
+    with pytest.raises(ValueError):
+        validate_frame(payload, ROOT)
+
+
+@pytest.mark.parametrize("side", ["right", "left"])
+def test_parallel_models_use_original_joint_values_and_do_not_step(side):
+    import mujoco
+    import numpy as np
+    from motorhand_teleop.sharpa_viewer import ComparisonScene
+
+    payload = frame()
+    payload.update(hand=side, joint_names=[f"{side}_{name}" for name in JOINT_SUFFIXES],
+                   scene_path=str(ROOT / f"assets/sharpa-hand/{side}.xml"),
+                   glove_tree_order="ve33_closure_independent_dependent", glove_tree_rad=[.01] * 68)
+    parsed = validate_frame(payload, ROOT)
+    scene = ComparisonScene(parsed)
+    scene.apply(parsed)
+    assert scene.model.nq == 90
+    assert np.allclose(scene.data.qpos[scene.glove_indices], .01)
+    assert np.allclose(scene.data.qpos[scene.hand_indices], 0.)
+    assert scene.data.time == 0
+    assert not np.any(scene.model.geom_contype)
+    assert not np.any(scene.model.geom_conaffinity)
+    assert mujoco.mj_name2id(scene.model, mujoco.mjtObj.mjOBJ_GEOM, "sharpa_teleop_locked_object_geom") == -1
+    glove = scene.data.xpos[scene.model.body("glove_base_link").id]
+    hand = scene.data.xpos[scene.model.body(f"sharpa_{side}_hand_C_MC").id]
+    assert hand[1] - glove[1] == pytest.approx(.34)
+    payload["qpos"][3] = .3
+    payload["glove_tree_rad"][5] = -.2
+    scene.apply(validate_frame(payload, ROOT))
+    assert scene.data.qpos[scene.hand_indices[3]] == pytest.approx(.3)
+    assert scene.data.qpos[scene.glove_indices[5]] == pytest.approx(-.2)
+    assert scene.data.time == 0

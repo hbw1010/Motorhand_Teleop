@@ -82,6 +82,8 @@ struct ControlSession<N>::Impl {
     std::optional<CommonJacobianSnapshot<N>> jacobian_result;
     JointArray<N> lower{}, upper{}, last_hand_target{}, hand_anchor{};
     JointArray<N> takeover_offset{}, takeover_last_raw{};
+    JointArray<N> takeover_goal{};
+    Vec12 takeover_last_motor{};
     JointArray<N> zero_reference{};
     bool takeover_has_raw = false;
     std::uint64_t takeover_offset_clock = 0;
@@ -150,15 +152,42 @@ struct ControlSession<N>::Impl {
         return frame;
     }
     GlovePose pose_for(const GloveFrame& frame) {
-        auto pose = model->evaluate_motors(frame.motor_rad, last_pose ? &*last_pose : nullptr);
-        last_pose = pose;
-        return pose;
+        try {
+            auto pose = model->evaluate_motors(frame.motor_rad, last_pose ? &*last_pose : nullptr);
+            last_pose = pose;
+            return pose;
+        } catch (const std::runtime_error& error) {
+            if constexpr (N == 22) {
+                const nlohmann::json sample{
+                    {"source_ns", frame.oldest_ns},
+                    {"motor_rad", frame.motor_rad},
+                    {"encoder_deg", frame.raw_degrees},
+                };
+                throw std::runtime_error("Motorhand实测姿态闭链失败 " + sample.dump() + "：" + error.what());
+            } else {
+                throw;
+            }
+        }
     }
     void check_target(const JointArray<N>& target) const {
         if (!finite(target)) throw std::invalid_argument("non-finite 机械手 target");
         for (int i = 0; i < N; ++i)
             if (target[i] < lower[i] || target[i] > upper[i])
                 throw std::invalid_argument("机械手 target exceeds joint limits");
+    }
+    JointArray<N> submit_position(const JointArray<N>& target, std::uint64_t until) {
+        require_deadline(until);
+        auto submitted = hand->submit_position(target, until);
+        check_target(submitted);
+        last_hand_target = submitted;
+        has_hand_target = true;
+        return submitted;
+    }
+    bool takeover_input_moved(const GloveFrame& frame) const {
+        for (std::size_t i = 0; i < frame.motor_rad.size(); ++i)
+            if (std::abs(frame.motor_rad[i] - takeover_last_motor[i]) >= options.takeover_motor_deadband_rad)
+                return true;
+        return false;
     }
     JointArray<N> measured_hold(const HandState<N>& frame) const {
         auto target = frame.position_rad;
@@ -242,9 +271,13 @@ const HandDescriptor<N>& ControlSession<N>::connect() {
         }
         if (s.options.force_feedback) {
             s.force->set_motor_limits(lo, hi);
-            if (s.options.driver_impedance_feedback)
+            if (s.options.driver_impedance_feedback) {
+                auto config = load_driver_impedance_config(s.options.driver_impedance_config.string());
+                if (s.options.driver_impedance_torque_margin)
+                    config.torque_margin = *s.options.driver_impedance_torque_margin;
                 s.impedance = std::make_unique<CommonDriverImpedancePlanner<N>>(
-                    load_driver_impedance_config(s.options.driver_impedance_config.string()),s.options.feedback_hardness,cal);
+                    config,s.options.feedback_hardness,cal);
+            }
         }
         s.hand->connect();
         if(s.hand->descriptor().identity.left!=s.options.left)
@@ -362,9 +395,8 @@ ControlTick<N> ControlSession<N>::step_inference(const JointArray<N>& input, std
             throw std::runtime_error("old glove output crossed mode barrier");
         require_deadline(until);
         if (s.inverse && fresh_inverse) require_deadline(glove_until);
-        s.hand->send(target, until);
+        target = s.submit_position(target, until);
         const auto hand_submit = now_ns();
-        s.last_hand_target = target; s.has_hand_target = true;
         if (s.inverse && fresh_inverse) {
             require_deadline(glove_until);
             s.output_worker->submit_position(requested_glove, glove_until - timeout_ns, glove_until);
@@ -404,7 +436,10 @@ ControlTick<N> ControlSession<N>::step_takeover() {
                 s.jacobian->submit(pose, g.oldest_ns); s.jac_submit_stamp = g.oldest_ns;
             }
         }
-        JointArray<N> target = s.retarget->solve(pose.points_m);
+        const bool use_motor_motion = s.options.takeover_motor_deadband_rad > 0 &&
+            s.options.takeover_offset_motion_rad > 0 && !s.options.zero_aligned_start;
+        const bool hold_goal = use_motor_motion && s.takeover_has_raw && !s.takeover_input_moved(g);
+        JointArray<N> target = hold_goal ? s.takeover_goal : s.retarget->solve(pose.points_m);
         if (!s.options.zero_aligned_start) s.check_target(target);
         std::array<bool, N> saturated{};
         double zero_blend = 1.0;
@@ -417,9 +452,10 @@ ControlTick<N> ControlSession<N>::step_takeover() {
             }
             zero_blend = s.hand_blend(now_ns(), true);
             target = blend(s.hand_anchor, target, zero_blend);
-        } else if (s.options.takeover_offset_motion_rad > 0) {
+        } else if (!hold_goal && s.options.takeover_offset_motion_rad > 0) {
             const auto now = now_ns();
-            if (!s.takeover_has_raw) {
+            const bool first_goal = !s.takeover_has_raw;
+            if (first_goal) {
                 for (int i = 0; i < N; ++i) s.takeover_offset[i] = s.hand_anchor[i] - target[i];
                 s.takeover_has_raw = true;
             } else {
@@ -427,15 +463,28 @@ ControlTick<N> ControlSession<N>::step_takeover() {
                 const double time_decay = s.options.takeover_offset_tau_ns ?
                     std::exp(-dt / double(s.options.takeover_offset_tau_ns)) : 1.0;
                 for (int i = 0; i < N; ++i) {
-                    const double motion = std::abs(target[i] - s.takeover_last_raw[i]);
-                    s.takeover_offset[i] *= time_decay * std::exp(-motion / s.options.takeover_offset_motion_rad);
+                    const double delta = target[i] - s.takeover_last_raw[i];
+                    const double motion = std::abs(delta);
+                    const double next_offset = s.takeover_offset[i] *
+                        time_decay * std::exp(-motion / s.options.takeover_offset_motion_rad);
+                    // 偏移减小不能抵消手指本次有意执行的运动并反向张开。
+                    if (use_motor_motion && delta * (next_offset - s.takeover_offset[i]) < 0)
+                        s.takeover_offset[i] += std::copysign(
+                            std::min(motion, std::abs(next_offset - s.takeover_offset[i])), -delta);
+                    else
+                        s.takeover_offset[i] = next_offset;
                 }
             }
             s.takeover_offset_clock = now;
             s.takeover_last_raw = target;
             for (int i = 0; i < N; ++i)
                 target[i] = std::clamp(target[i] + s.takeover_offset[i], s.lower[i], s.upper[i]);
-        } else {
+            if (use_motor_motion) {
+                if (first_goal) target = s.hand_anchor;
+                s.takeover_goal = target;
+                s.takeover_last_motor = g.motor_rad;
+            }
+        } else if (!hold_goal) {
             target = blend(s.hand_anchor, target, s.hand_blend(now_ns(), true));
         }
         s.check_target(target);
@@ -444,9 +493,8 @@ ControlTick<N> ControlSession<N>::step_takeover() {
         if (completed && completed->mode != GloveOutputMode::force)
             throw std::runtime_error("old glove output crossed mode barrier");
         require_deadline(until);
-        s.hand->send(target, until);
+        target = s.submit_position(target, until);
         const auto hand_submit = now_ns();
-        s.last_hand_target = target; s.has_hand_target = true;
         if (s.options.force_feedback) {
             require_deadline(until);
             auto effective_jacobian = s.jacobian_result;

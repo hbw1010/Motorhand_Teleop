@@ -8,7 +8,8 @@ struct DriverImpedanceConfig {
     double stiffness_min=5, stiffness_max=60, gain=1, damping_s=.008, damping_max=.5;
     Vec12 joint_gain{1.5,1,1,1,1,1,1,1,1,1,1,1};
     Vec12 kp_max{100,80,80,80,80,80,80,80,80,80,80,80};
-    double lookahead_s=.02, damping_off_velocity=.15, damping_on_velocity=.05, torque_margin=.85;
+    double lookahead_s=.02, damping_off_velocity=.15, damping_on_velocity=.05;
+    double torque_margin=default_impedance_torque_margin;
     double surface_rate=1, inverse_regularization=.01, max_proxy_offset=.15, ramp_s=.15;
     double velocity_filter_hz=12, velocity_deadband=.02, velocity_scale=.08, friction_gain=1, friction_max=.6;
     Vec12 coulomb_nm{.25,.10,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25};

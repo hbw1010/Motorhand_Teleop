@@ -67,8 +67,22 @@ std::vector<double> CommonForceJacobianColumns<N>::compute_centre(const Vec12& q
         Vec12 plus = q, minus = q;
         plus[columns[k]] += step_rad;
         minus[columns[k]] -= step_rad;
-        const auto plus_pose = model_.evaluate_joints(plus, &centre);
-        const auto minus_pose = model_.evaluate_joints(minus, &centre);
+        const auto evaluate_probe = [&](const Vec12& joints, double signed_step_rad) {
+            try {
+                return model_.evaluate_joints(joints, &centre);
+            } catch (const std::runtime_error& error) {
+                if constexpr (N == 22) {
+                    const int axis = columns[k];
+                    throw std::runtime_error("Sharpa力反馈雅可比扰动点闭链失败，手套模型关节 " +
+                        std::to_string(axis + 1) + "，中心角 " + std::to_string(q[axis]) +
+                        " rad，扰动 " + std::to_string(signed_step_rad) + " rad：" + error.what());
+                } else {
+                    throw;
+                }
+            }
+        };
+        const auto plus_pose = evaluate_probe(plus, step_rad);
+        const auto minus_pose = evaluate_probe(minus, -step_rad);
         retarget_->reset();
         const JointArray<N> plus_hand = retarget_->solve(plus_pose.points_m);
         retarget_->reset();

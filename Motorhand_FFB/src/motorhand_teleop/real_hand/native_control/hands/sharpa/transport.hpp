@@ -31,5 +31,6 @@ public:
   virtual std::uint64_t system_ns();
   virtual void sleep_ns(std::uint64_t);
 };
+void configure_sdk_file_logging(const std::string& path);
 std::unique_ptr<Transport> make_sdk_transport();
 } // namespace motorhand::native::sharpa

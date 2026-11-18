@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 namespace motorhand::native {
 struct ControlOptions {
@@ -15,6 +16,7 @@ struct ControlOptions {
     bool linear_force_feedback = false;
     bool driver_impedance_feedback = false; // force-contact CLI默认启用；其他调用保留旧模式。
     std::filesystem::path driver_impedance_config;
+    std::optional<double> driver_impedance_torque_margin;
     double feedback_hardness = 0.3; // 人工设定，非物体硬度估计。
     bool left = false;
     // 独立力反馈遥操：两侧各自回零，使用固定的手套零位重定向参考。
@@ -39,6 +41,8 @@ struct ControlOptions {
     // to be judged on hardware).
     double takeover_offset_motion_rad = 0.10;
     std::uint64_t takeover_offset_tau_ns = 0;
+    // 非零时，只在实测模型电机角相对上次求解确有变化时更新接管目标。
+    double takeover_motor_deadband_rad = 0.0;
 };
 
 inline void validate_control_options(const ControlOptions& options) {
@@ -51,5 +55,7 @@ inline void validate_control_options(const ControlOptions& options) {
         if (!std::isfinite(options.feedback_hardness) || options.feedback_hardness<0 || options.feedback_hardness>1)
             throw std::invalid_argument("feedback hardness must be in [0,1]");
         if (!options.transition_ns) throw std::invalid_argument("transition duration must be positive");
+        if (!std::isfinite(options.takeover_motor_deadband_rad) || options.takeover_motor_deadband_rad < 0)
+            throw std::invalid_argument("takeover motor deadband must be finite and nonnegative");
 }
 }

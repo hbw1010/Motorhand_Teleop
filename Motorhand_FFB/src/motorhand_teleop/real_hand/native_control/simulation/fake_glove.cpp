@@ -96,13 +96,30 @@ Vec12 FakeGlove::write_torque(const Vec12& tau,std::uint64_t deadline){
     auto& s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);s.require_output(true);s.validate_torque(tau);s.confirm_write(deadline);s.nominal=tau;return tau;
 }
 DriverImpedanceSubmission FakeGlove::write_impedance(const DriverImpedanceCommand& c,std::uint64_t deadline){
+    if(!std::isfinite(c.torque_margin)||c.torque_margin<=0||c.torque_margin>1)
+        throw std::invalid_argument("模拟手套阻抗预算系数无效");
     auto& s=*impl_;std::lock_guard<std::mutex> lock(s.mutex);s.require_output(true);s.validate_position(c.target_rad);
     DriverImpedanceSubmission out;out.command=c;out.estimate_received_ns=s.frame.received_ns;
     for(std::size_t i=0;i<12;++i){
         if(!std::isfinite(c.kp[i])||c.kp[i]<0||!std::isfinite(c.kd[i])||c.kd[i]<0||!std::isfinite(c.velocity_rad_s[i]))
             throw std::invalid_argument("模拟手套阻抗参数无效");
         out.pd_nm[i]=c.kp[i]*(c.target_rad[i]-s.frame.motor_rad[i])-c.kd[i]*c.velocity_rad_s[i];
-        out.friction_nm[i]=c.feedforward_nm[i];out.nominal_nm[i]=out.pd_nm[i]+c.feedforward_nm[i];
+        double nominal=out.pd_nm[i]+c.feedforward_nm[i];
+        const auto& axis=s.cal[i];
+        // 手套姿态可能已更新。与真机提交一致，按本次估算重新分配阻抗预算。
+        const double budget=c.torque_margin*axis.raw_torque_limit_nm/std::abs(axis.sign*axis.scale);
+        if(axis.has_torque_limit&&std::isfinite(nominal)&&std::abs(nominal)>budget){
+            const double scale=std::nextafter(budget,0.)/std::abs(nominal);
+            out.command.kp[i]*=scale;
+            out.command.kd[i]*=scale;
+            out.command.feedforward_nm[i]*=scale;
+            out.pd_nm[i]*=scale;
+            nominal*=scale;
+            out.observation[i].torque_limited=true;
+            out.observation[i].add(ImpedanceReason::torque_budget_limited);
+        }
+        out.friction_nm[i]=out.command.feedforward_nm[i];
+        out.nominal_nm[i]=nominal;
     }
     s.validate_torque(out.nominal_nm);s.confirm_write(deadline);s.nominal=out.nominal_nm;return out;
 }

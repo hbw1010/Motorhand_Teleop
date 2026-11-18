@@ -1,4 +1,6 @@
 #include "motorhand_teleop/real_hand/native_control/simulation/sharpa_device.hpp"
+#include "motorhand_teleop/real_hand/native_control/simulation/fake_glove.hpp"
+#include "motorhand_teleop/real_hand/native_control/common/driver_impedance.hpp"
 #include "motorhand_teleop/real_hand/native_control/hands/sharpa/model.hpp"
 #include <chrono>
 #include <algorithm>
@@ -21,7 +23,59 @@ void run_for(SharpaDevice& d,const JointArray<22>& q,int milliseconds){
  const auto end=Clock::now()+std::chrono::milliseconds(milliseconds);
  while(Clock::now()<end){d.send(q,now_ns()+hand_timeout_ns);std::this_thread::sleep_for(std::chrono::milliseconds(10));}
 }
+void glove_respects_impedance_budget() {
+ std::array<EncosMotorCalibration, 12> calibration{};
+ for (std::size_t i = 0; i < calibration.size(); ++i) {
+  auto& axis = calibration[i];
+  axis.raw_motor_id = i + 1;
+  axis.sign = axis.scale = 1;
+  axis.model_min_rad = -1;
+  axis.model_max_rad = 1;
+  axis.raw_torque_limit_nm = 4;
+  axis.has_torque_limit = true;
+ }
+ FakeGlove glove(calibration);
+ glove.connect();
+ glove.home();
+ glove.enable_force();
+ DriverImpedanceCommand command;
+ command.target_rad[5] = .1;
+ command.kp[5] = 40;
+ command.blocked_direction[5] = -1;
+ const auto applied = glove.write_impedance(command, now_ns() + hand_timeout_ns);
+ check(applied.nominal_nm[5] > 3.3 && applied.nominal_nm[5] <= 3.4,
+       "仿真手套应在提交时重新限制阻抗名义力矩");
+ check(std::abs(applied.nominal_nm[5] - applied.command.kp[5] * .1) < 1e-10,
+       "仿真名义力矩应对应下发的阻抗增益");
+
+ DriverImpedanceConfig config;
+ config.torque_margin = .95;
+ config.stiffness_min = config.stiffness_max = 40;
+ config.surface_rate = 100;
+ config.ramp_s = 0;
+ CommonDriverImpedancePlanner<22> planner(config, .3, calibration);
+ GlovePose pose;
+ for (std::size_t i = 0; i < calibration.size(); ++i)
+  pose.motor_jacobian[12 * i + i] = 1;
+ RetargetJacobian<22> jacobian{};
+ jacobian[5] = 1;
+ HandState<22> hand;
+ JointArray<22> target{};
+ target[0] = .12;
+ FeedbackResult<22> contact;
+ contact.active = contact.contact[0] = contact.impedance_contact[0] = true;
+ contact.contact_direction[0] = 1;
+ const auto frame = glove.read();
+ const auto now = now_ns();
+ planner.reset(now);
+ const auto plan = planner.step(target, hand, frame, pose, jacobian, contact, now);
+ check(plan.valid && std::abs(plan.nominal_nm[5]) > 3.7, "规划器应使用95%预算");
+ const auto submitted = glove.write_impedance(plan.command, now + hand_timeout_ns);
+ const double torque = std::abs(submitted.nominal_nm[5]);
+ check(torque > 3.7 && torque <= 3.8, "仿真提交应使用规划器的95%预算");
+}
 int main(int argc,char**argv){try{
+ glove_respects_impedance_budget();
  auto repo=argc>1?std::filesystem::path(argv[1]):std::filesystem::current_path().parent_path();auto assets=repo/"Motorhand_FFB/assets/sharpa-hand";
 
  {

@@ -53,6 +53,8 @@ TerminalKeys::TerminalKeys(int fd) : fd_(fd) {
     if (saved_flags_ < 0) throw system_error("fcntl F_GETFL", errno);
     termios raw = saved_termios_;
     ::cfmakeraw(&raw);
+    // Only the key reader needs raw mode; leave output newline handling intact.
+    raw.c_oflag = saved_termios_.c_oflag;
     // Ctrl+C must remain a signal handled by the owning process.
     raw.c_lflag |= ISIG;
     raw.c_cc[VMIN] = 1;

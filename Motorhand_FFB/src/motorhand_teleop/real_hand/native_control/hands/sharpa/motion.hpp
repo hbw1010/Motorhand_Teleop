@@ -6,38 +6,58 @@
 #include <fstream>
 #include <vector>
 namespace motorhand::native::sharpa {
+enum class MotionTargetSource { measured, submitted };
+
 class MotionRecorder {
 public:
-    MotionRecorder(const std::filesystem::path& path,const HandDescriptor<22>& d):lower_(d.lower_rad),upper_(d.upper_rad){
+    MotionRecorder(const std::filesystem::path& path,const HandDescriptor<22>& d,
+                   MotionTargetSource target_source = MotionTargetSource::measured)
+        :lower_(d.lower_rad),upper_(d.upper_rad),target_source_(target_source){
         if(std::filesystem::exists(path))throw std::runtime_error("轨迹文件已存在，拒绝覆盖");
         if(!path.parent_path().empty())std::filesystem::create_directories(path.parent_path());
         out_.open(path);if(!out_)throw std::runtime_error("无法创建轨迹文件");
         out_<<nlohmann::json{{"schema_version",2},{"robot","sharpa"},{"hand",d.identity.left?"left":"right"},
             {"serial",d.identity.serial},{"joint_names",d.joint_names},{"position_unit","rad"},
             {"load_unit","Nm"},{"load_source",d.load_source},
-            {"target_source","measured_position_projected_to_command_limits"}}.dump()<<'\n';
+            {"target_source",target_source==MotionTargetSource::submitted
+                ? "submitted_position_target" : "measured_position_projected_to_command_limits"}}.dump()<<'\n';
     }
     void append(std::uint64_t source_ns,const JointArray<22>& q){
         append_frame(source_ns,q,nlohmann::json::object());
     }
     void append(const HandState<22>& s){
-        append_frame(s.received_ns,s.position_rad,{{"source_ns",s.received_ns},{"device_time",s.device_time},
-            {"sequence",s.sequence},{"velocity_rad_s",s.has_velocity?nlohmann::json(s.velocity_rad_s):nlohmann::json(nullptr)},
-            {"load_nm",s.has_load?nlohmann::json(s.load):nlohmann::json(nullptr)},{"load_source",s.load_source}});
+        append_state(s, nullptr);
+    }
+    void append(const HandState<22>& s,const JointArray<22>& submitted){
+        append_state(s, &submitted);
     }
     void finish(){out_.flush();if(!out_)throw std::runtime_error("轨迹写入未完成");out_.close();if(!out_)throw std::runtime_error("轨迹关闭失败");}
 private:
-    void append_frame(std::uint64_t source_ns,const JointArray<22>& q,nlohmann::json row){
+    void append_state(const HandState<22>& s,const JointArray<22>* submitted){
+        append_frame(s.received_ns,s.position_rad,{{"source_ns",s.received_ns},{"device_time",s.device_time},
+            {"sequence",s.sequence},{"velocity_rad_s",s.has_velocity?nlohmann::json(s.velocity_rad_s):nlohmann::json(nullptr)},
+            {"load_nm",s.has_load?nlohmann::json(s.load):nlohmann::json(nullptr)},{"load_source",s.load_source}},submitted);
+    }
+    void append_frame(std::uint64_t source_ns,const JointArray<22>& q,nlohmann::json row,
+                      const JointArray<22>* submitted=nullptr){
+        if((submitted!=nullptr)!=(target_source_==MotionTargetSource::submitted))
+            throw std::invalid_argument("轨迹目标来源与记录模式不一致");
         if(!source_ns)throw std::invalid_argument("轨迹源时间无效");
         for(double v:q)if(!std::isfinite(v))throw std::invalid_argument("轨迹角度非有限");
+        JointArray<22> target{};
+        for(int i=0;i<22;++i) {
+            target[i]=submitted ? (*submitted)[i] : std::clamp(q[i],lower_[i],upper_[i]);
+            if(!std::isfinite(target[i])||target[i]<lower_[i]||target[i]>upper_[i])
+                throw std::invalid_argument("已提交的轨迹目标非法");
+        }
         if(first_&&source_ns<=last_)return;
         if(!first_)first_=source_ns;
-        JointArray<22>target{};for(int i=0;i<22;++i)target[i]=std::clamp(q[i],lower_[i],upper_[i]);
         row["t_ns"]=source_ns-first_;row["position_rad"]=q;row["target_rad"]=target;
         out_<<row.dump()<<'\n';
         if(!out_)throw std::runtime_error("轨迹写入失败");last_=source_ns;
     }
     std::ofstream out_;std::uint64_t first_{},last_{};JointArray<22>lower_{},upper_{};
+    MotionTargetSource target_source_;
 };
 class Motion {
 public:

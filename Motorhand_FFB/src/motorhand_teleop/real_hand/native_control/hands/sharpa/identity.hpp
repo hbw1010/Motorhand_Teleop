@@ -6,6 +6,7 @@ inline constexpr const char *torque_source = "sharpa-sdk-reported-joint-torque";
 struct DeviceInfo {
   std::string serial, pn, firmware, address;
   bool left{}, is_hand = true;
+  bool sdk_source{}, position_mode{};
 };
 struct DeviceOptions {
   std::string serial, expected_pn, approved_firmware, address;

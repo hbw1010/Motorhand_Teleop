@@ -357,6 +357,12 @@ void impedance_test(const Files& files) {
     applied=driver.write_impedance(command,now_ns()+100000000);
     for(int i=0;i<12;++i)check(std::abs(applied.nominal_nm[i]*1.5)<=.850001,"大误差和阻尼不得突破发送时总预算");
     for(const auto& o:applied.observation)check(o.torque_limited,"SDK额外缩放预算必须可观测");
+    command.torque_margin=.95;
+    applied=driver.write_impedance(command,now_ns()+100000000);
+    for(double nominal:applied.nominal_nm)
+        check(std::abs(nominal*1.5)>.90 && std::abs(nominal*1.5)<=.95,"SDK提交应使用规划器传入的95%预算");
+    command.torque_margin=1.01;
+    throws([&]{driver.write_impedance(command,now_ns()+100000000);},"SDK应拒绝超过全额的阻抗预算");
     command={};mark=buses.mark();applied=driver.write_impedance(command,now_ns()+100000000);
     frames=buses.after(mark,2);seen={};for(const auto& f:frames){auto w=word(f);if((w>>61)==1&&((w>>2)&0xfff)==0)seen[f.id-1]=true;}
     for(int i=0;i<12;++i)check(seen[i]&&applied.nominal_nm[i]==0,"撤力必须使用精确零电流而非MIT半LSB");

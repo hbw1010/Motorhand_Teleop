@@ -1,6 +1,7 @@
 #include "device.hpp"
 #include <algorithm>
 #include <chrono>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 namespace motorhand::native::sharpa {
@@ -144,7 +145,7 @@ void Device::connect() {
     throw;
   }
 }
-HandState<22> Device::read_locked() {
+Packet Device::read_packet_locked() {
   ready_locked();
   auto p = transport_->state();
   check_permission();
@@ -186,9 +187,20 @@ HandState<22> Device::read_locked() {
     have_packet_ = true;
   } else if (p.angles != last_packet_.angles ||
              p.velocities != last_packet_.velocities ||
-             p.torques != last_packet_.torques)
-    throw std::runtime_error("Sharpa重复缓存内容发生变化");
+             p.torques != last_packet_.torques) {
+    // SDK 偶尔返回内容变化但包身份未变的快照。只用上一份完整数据，
+    // 保留其原始收包时间，连续缓存冲突仍会因超时而停机。
+    p = last_packet_;
+    if (!reported_cache_conflict_) {
+      std::clog << "Sharpa丢弃同一时间戳下内容不一致的SDK缓存，沿用上一帧原始时间\n";
+      reported_cache_conflict_ = true;
+    }
+  }
   fresh(received_ns_, now);
+  return p;
+}
+HandState<22> Device::read_locked() {
+  const auto p = read_packet_locked();
   const auto info = transport_->device_info();
   check_permission();
   verify_identity(info, options_);
@@ -240,6 +252,12 @@ HandState<22> Device::read() {
 void Device::wait_enabled_locked(bool desired) {
   auto end = transport_->monotonic_ns() + seconds(options_.enable_timeout_s);
   while (true) {
+    if (desired) {
+      // 使能 RPC 已在原期限内返回。仅凭新鲜关节包维持确认阶段，
+      // 整段等待有独立上限；此处没有位置输出，也不重发使能。
+      read_packet_locked();
+      arm_locked(end, received_ns_);
+    }
     const bool enabled = transport_->is_enabled();
     if (desired)
       check_permission();
@@ -247,17 +265,18 @@ void Device::wait_enabled_locked(bool desired) {
       return;
     if (transport_->monotonic_ns() >= end)
       throw std::runtime_error("Sharpa整手使能确认超时");
-    transport_->sleep_ns(10'000'000);
+    // 使能 RPC 返回时，100ms 预算可能已剩不足 20ms。
+    transport_->sleep_ns(desired ? 2'000'000 : 10'000'000);
   }
 }
-void Device::arm_locked(std::uint64_t source, const HandState<22> &s) {
+void Device::arm_locked(std::uint64_t source, std::uint64_t received_ns) {
   check_permission();
   auto now = transport_->monotonic_ns();
-  fresh(s.received_ns, now);
+  fresh(received_ns, now);
   if (source <= now)
     throw std::runtime_error("Sharpa原始命令期限已过");
   deadline_ns_ = std::min(
-      {source, now + hand_timeout_ns, s.received_ns + hand_timeout_ns});
+      {source, now + hand_timeout_ns, received_ns + hand_timeout_ns});
   safety_->steady_deadline = steady_ns() + (deadline_ns_ - now);
   safety_->original_deadline = deadline_ns_;
   cv_.notify_all();
@@ -265,32 +284,60 @@ void Device::arm_locked(std::uint64_t source, const HandState<22> &s) {
 void Device::enable() {
   std::lock_guard<std::mutex> lock(*mutex_);
   Busy busy(safety_->sdk_busy);
+  const char *phase = "使能前检查";
+  std::uint64_t armed_ns = 0, enable_return_ns = 0, feedback_age_ns = 0;
   try {
     ready_locked();
     if (active_)
       throw std::runtime_error("Sharpa重复使能");
-    verify_identity(transport_->device_info(), options_, true);
+    const auto info = transport_->device_info();
+    verify_identity(info, options_, true);
     if (transport_->is_enabled())
       throw std::runtime_error("Sharpa外部已使能");
-    auto initial = read_locked();
-    arm_locked(transport_->monotonic_ns() + hand_timeout_ns, initial);
+    const auto initial = read_locked();
+    armed_ns = transport_->monotonic_ns();
+    feedback_age_ns = armed_ns - initial.received_ns;
+    arm_locked(armed_ns + hand_timeout_ns, initial.received_ns);
     owned_ = true;
     safety_->owned = true;
     safety_->confirmed = false;
     check_permission();
-    transport_->use_sdk_source();
+    if (!info.sdk_source) {
+      phase = "配置SDK控制源";
+      transport_->use_sdk_source();
+      check_permission();
+      read_locked();
+    }
+    phase = info.position_mode ? "SDK显式使能" : "切换SDK位置模式";
+    if (info.position_mode) {
+      transport_->set_enabled(true);
+    } else {
+      // set_control_mode 自带一次使能，已为该动作建立原始期限。
+      transport_->use_position_mode();
+    }
+    enable_return_ns = transport_->monotonic_ns();
     check_permission();
-    read_locked();
-    check_permission();
-    transport_->use_position_mode();
-    check_permission();
-    transport_->set_enabled(true);
-    check_permission();
+    phase = "读取SDK使能确认";
     wait_enabled_locked(true);
-    auto s = read_locked();
+    phase = "确认使能后读取状态";
+    // 已取得使能确认。用新的原始关节包进入就绪状态；home 会在发目标前再验身份和故障。
+    read_packet_locked();
     active_ = true;
     homed_ = false;
-    arm_locked(transport_->monotonic_ns() + hand_timeout_ns, s);
+    arm_locked(transport_->monotonic_ns() + hand_timeout_ns, received_ns_);
+  } catch (const std::exception &error) {
+    const auto failed_ns = transport_->monotonic_ns();
+    fail_locked();
+    std::string diagnostic = std::string("Sharpa") + phase + "：" + error.what();
+    if (armed_ns) {
+      diagnostic += "（起始反馈龄 " + std::to_string(feedback_age_ns / 1e6) +
+                    " ms，使能阶段累计 " + std::to_string((failed_ns - armed_ns) / 1e6) +
+                    " ms";
+      if (enable_return_ns)
+        diagnostic += "，SDK使能调用返回 " + std::to_string((enable_return_ns - armed_ns) / 1e6) + " ms";
+      diagnostic += "）";
+    }
+    throw std::runtime_error(diagnostic);
   } catch (...) {
     fail_locked();
     throw;
@@ -328,7 +375,7 @@ void Device::home(const std::atomic<bool> *stop) {
         JointArray<22> q;
         for (int i = 0; i < 22; ++i)
           q[i] = start[i] * (1 - w);
-        arm_locked(end, s);
+        arm_locked(end, s.received_ns);
         check_permission();
         transport_->set_positions(q);
         check_permission();
@@ -345,10 +392,10 @@ void Device::home(const std::atomic<bool> *stop) {
         homed_ = true;
         last_target_ = {};
         last_send_ns_ = transport_->monotonic_ns();
-        arm_locked(last_send_ns_ + hand_timeout_ns, s);
+        arm_locked(last_send_ns_ + hand_timeout_ns, s.received_ns);
         return;
       }
-      arm_locked(end, s);
+      arm_locked(end, s.received_ns);
       transport_->sleep_ns(10'000'000);
     }
   } catch (...) {
@@ -357,6 +404,10 @@ void Device::home(const std::atomic<bool> *stop) {
   }
 }
 void Device::send(const JointArray<22> &q, std::uint64_t source) {
+  submit_position(q, source);
+}
+JointArray<22> Device::submit_position(const JointArray<22> &q,
+                                      std::uint64_t source) {
   std::lock_guard<std::mutex> lock(*mutex_);
   Busy busy(safety_->sdk_busy);
   try {
@@ -371,10 +422,12 @@ void Device::send(const JointArray<22> &q, std::uint64_t source) {
     auto now = transport_->monotonic_ns();
     JointArray<22> output;
     double step = options_.max_velocity_rad_s * (now - last_send_ns_) * 1e-9;
-    for (int i = 0; i < 22; ++i)
-      output[i] =
-          last_target_[i] + std::clamp(q[i] - last_target_[i], -step, step);
-    arm_locked(source, s);
+    for (int i = 0; i < 22; ++i) {
+      const auto delta = q[i] - last_target_[i];
+      output[i] = std::abs(delta) <= step ? q[i] :
+          last_target_[i] + std::copysign(step, delta);
+    }
+    arm_locked(source, s.received_ns);
     check_permission();
     transport_->set_positions(output);
     check_permission();
@@ -382,6 +435,7 @@ void Device::send(const JointArray<22> &q, std::uint64_t source) {
       throw std::runtime_error("Sharpa发送跨越原始期限");
     last_target_ = output;
     last_send_ns_ = now;
+    return output;
   } catch (...) {
     fail_locked();
     throw;

@@ -93,6 +93,7 @@ template<std::size_t N>
 CommonDriverImpedancePlan<N> CommonDriverImpedancePlanner<N>::step(const JointArray<N>& target,const HandState<N>& hand,const GloveFrame& g,const GlovePose& pose,
     const RetargetJacobian<N>& jac,const FeedbackResult<N>& contact,std::uint64_t now){
     CommonDriverImpedancePlan<N> out;out.command.target_rad=g.motor_rad;
+    out.command.torque_margin=config_.torque_margin;
     auto& observation=out.observation;observation.input_rad=g.motor_rad;observation.source_ns=g.received_ns;
     auto release=[&](ImpedanceReason reason){
         observation.impedance_contact={};for(auto& axis:observation.axes)axis.add(reason);
@@ -150,10 +151,11 @@ CommonDriverImpedancePlan<N> CommonDriverImpedancePlanner<N>::step(const JointAr
             if(!coupled&&!config_.friction_enabled)observed.add(ImpedanceReason::friction_disabled);
             if(!coupled&&config_.friction_enabled){const double moving=std::copysign(std::max(0.,std::abs(dq)-config_.velocity_deadband),dq);
                 const double friction=config_.friction_gain*(config_.coulomb_nm[raw]/factor*std::tanh(moving/config_.velocity_scale)+config_.viscous*moving);
-                if(std::abs(friction)>std::min(cap*.85,config_.friction_max/factor)){
+                const double friction_cap=std::min(cap*config_.torque_margin,config_.friction_max/factor);
+                if(std::abs(friction)>friction_cap){
                     observed.torque_limited=true;observed.add(ImpedanceReason::friction_limited);
                 }
-                axis.feedforward_nm=std::clamp(friction,-std::min(cap*.85,config_.friction_max/factor),std::min(cap*.85,config_.friction_max/factor))*ramp;
+                axis.feedforward_nm=std::clamp(friction,-friction_cap,friction_cap)*ramp;
             }
         }
         direction_[i]=dir;out.proxy_surface_rad[i]=surface_[i];out.command.blocked_direction[i]=dir;

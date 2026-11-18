@@ -35,7 +35,9 @@ DeviceInfo convert(const ::sharpa::DeviceInfo &i) {
           i.firmware_version,
           i.ip,
           i.hand_side == ::sharpa::HandSide::LEFT,
-          i.device_type == ::sharpa::DeviceType::HAND};
+          i.device_type == ::sharpa::DeviceType::HAND,
+          i.control_source == ::sharpa::ControlSource::SDK,
+          i.control_mode == ::sharpa::ControlMode::POSITION};
 }
 class SdkTransport final : public Transport {
   ::sharpa::SharpaWave *wave_{};
@@ -127,10 +129,14 @@ public:
   }
 };
 } // namespace
+void configure_sdk_file_logging(const std::string& path) {
+  ::setup_cpp_logging(path, false);
+}
 std::unique_ptr<Transport> make_sdk_transport() {
   return std::make_unique<SdkTransport>();
 }
 #else
+void configure_sdk_file_logging(const std::string&) {}
 std::unique_ptr<Transport> make_sdk_transport() {
   throw std::runtime_error("构建未启用Sharpa官方SDK");
 }

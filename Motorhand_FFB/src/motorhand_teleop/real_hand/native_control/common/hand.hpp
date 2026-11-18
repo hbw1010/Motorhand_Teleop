@@ -87,6 +87,11 @@ public:
     virtual void enable()=0;
     virtual void home(const std::atomic<bool>* stop_requested=nullptr)=0;
     virtual void send(const JointArray<N>&,std::uint64_t original_deadline_ns)=0;
+    // 返回本次提交的目标。设备侧限速时，返回处理后传给驱动的角度。
+    virtual JointArray<N> submit_position(const JointArray<N>& target,std::uint64_t original_deadline_ns) {
+        send(target, original_deadline_ns);
+        return target;
+    }
     virtual void disable()=0;
     virtual void close()=0;
 };

@@ -105,12 +105,12 @@ build-sharpa-sim = { cmd = "cmake -S src/motorhand_teleop/real_hand/native_contr
 test-sharpa = { cmd = "ctest --test-dir .cache/sharpa-control --output-on-failure", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
 sharpa-discover = { cmd = ".cache/sharpa-control/motorhand_sharpa discover", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
 sharpa-inspect = { cmd = ".cache/sharpa-control/motorhand_sharpa inspect", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
-sharpa-teleop = { cmd = ".cache/sharpa-control/motorhand_sharpa teleop", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
-sharpa-force-contact = { cmd = ".cache/sharpa-control/motorhand_sharpa force-contact", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
-sharpa-force-linear = { cmd = ".cache/sharpa-control/motorhand_sharpa force-linear", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
+sharpa-teleop = { cmd = "python -m motorhand_teleop.sharpa_sim teleop", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
+sharpa-force-contact = { cmd = "python -m motorhand_teleop.sharpa_sim force-contact", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
+sharpa-force-linear = { cmd = "python -m motorhand_teleop.sharpa_sim force-linear", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
 sharpa-record = { cmd = ".cache/sharpa-control/motorhand_sharpa record", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
 sharpa-replay = { cmd = ".cache/sharpa-control/motorhand_sharpa replay", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
-sharpa-takeover = { cmd = ".cache/sharpa-control/motorhand_sharpa takeover", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
-sharpa-sim = { cmd = ".cache/sharpa-sim-control/motorhand_sharpa sim", cwd = "Motorhand_FFB", depends-on = ["build-sharpa-sim"] }
-sharpa-sim-teleop = { cmd = ".cache/sharpa-sim-control/motorhand_sharpa sim-teleop", cwd = "Motorhand_FFB", depends-on = ["build-sharpa-sim"] }
+sharpa-takeover = { cmd = "python -m motorhand_teleop.sharpa_sim takeover", cwd = "Motorhand_FFB", depends-on = ["build-sharpa"] }
+sharpa-sim = { cmd = "python -m motorhand_teleop.sharpa_sim sim", cwd = "Motorhand_FFB", depends-on = ["build-sharpa-sim"] }
+sharpa-sim-teleop = { cmd = "python -m motorhand_teleop.sharpa_sim sim-teleop", cwd = "Motorhand_FFB", depends-on = ["build-sharpa-sim"] }
 sharpa-viewer = { cmd = "python -m motorhand_teleop.sharpa_viewer", cwd = "Motorhand_FFB" }

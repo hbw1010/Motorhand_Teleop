@@ -17,6 +17,7 @@ execute_process(COMMAND "${Python_EXECUTABLE}" -c "import pathlib,mujoco; print(
                 OUTPUT_VARIABLE MUJOCO_ROOT OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
 find_library(MUJOCO_LIBRARY NAMES mujoco libmujoco.so.4.0.0 PATHS "${MUJOCO_ROOT}" NO_DEFAULT_PATH REQUIRED)
 add_library(sharpa_control_core STATIC
+  adaptive_retarget.cpp
   "${CONTROL_ROOT}/common/driver_impedance.cpp" "${CONTROL_ROOT}/common/force_jacobian.cpp"
   "${CONTROL_ROOT}/common/glove_output.cpp" "${CONTROL_ROOT}/common/inverse_retarget.cpp"
   "${CONTROL_ROOT}/common/inverse_worker.cpp" "${CONTROL_ROOT}/common/jacobian_worker.cpp"
@@ -42,6 +43,9 @@ add_executable(motorhand_sharpa main.cpp)
 target_compile_definitions(motorhand_sharpa PRIVATE MOTORHAND_PROJECT_ROOT="${PROJECT_ROOT}")
 target_link_libraries(motorhand_sharpa PRIVATE sharpa_control_core)
 set_target_properties(motorhand_sharpa PROPERTIES BUILD_RPATH "${MUJOCO_ROOT};${SHARPA_SDK_ROOT}/lib")
+add_executable(sharpa_retarget_probe retarget_probe.cpp)
+target_compile_definitions(sharpa_retarget_probe PRIVATE MOTORHAND_PROJECT_ROOT="${PROJECT_ROOT}")
+target_link_libraries(sharpa_retarget_probe PRIVATE sharpa_control_core)
 enable_testing()
 foreach(pair IN ITEMS "model" "device" "feedback" "simulation" "entry" "motion" "inverse")
   add_executable(sharpa_${pair}_native_test "${PROJECT_ROOT}/tests/test_sharpa_${pair}_native.cpp")

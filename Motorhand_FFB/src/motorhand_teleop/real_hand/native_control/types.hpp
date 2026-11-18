@@ -43,11 +43,14 @@ template<std::size_t N> struct CommonDriverImpedanceObservation {
 
 using DriverImpedanceObservation = CommonDriverImpedanceObservation<20>;
 
+inline constexpr double default_impedance_torque_margin = .85;
+
 // MIT命令均为GLOVE_JOINTS模型电机轴；velocity仅用于提交时名义估算。
 struct DriverImpedanceCommand {
     Vec12 target_rad{}, kp{}, kd{}, feedforward_nm{}, velocity_rad_s{};
     std::array<int, 12> blocked_direction{};
     std::array<std::uint64_t,12> velocity_received_ns{};
+    double torque_margin = default_impedance_torque_margin;
 };
 struct DriverImpedanceSubmission {
     DriverImpedanceCommand command{}; // 量化后实际提交参数，仍以模型轴表示。
